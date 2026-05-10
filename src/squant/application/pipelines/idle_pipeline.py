@@ -51,8 +51,8 @@ class IdlePipeline:
         if forbidden:
             logger.info(f"差金決済 exclusion: {forbidden}")
 
-        # Fetch market data (90 calendar days of history)
-        start = today - timedelta(days=120)
+        # Fetch market data — 160 calendar days ≈ 115 trading days (>= HISTORY_DAYS_REQUIRED=90)
+        start = today - timedelta(days=160)
         adj_close, volume = self._data.fetch_ohlcv(self._universe, start, today)
 
         # System-level freshness check
@@ -105,8 +105,13 @@ class IdlePipeline:
         logger.info(f"Candidates after screening: {len(filtered_tickers)}")
 
         # Signal detection
+        # Merge volume columns so signal_engine can find {ticker}_vol
+        ohlcv_for_signals = adj_close.copy()
+        for col in volume.columns:
+            ohlcv_for_signals[f"{col}_vol"] = volume[col]
+
         candidates = signal_engine.detect_signals(
-            filtered_tickers, adj_close, fundamentals, today
+            filtered_tickers, ohlcv_for_signals, fundamentals, today
         )
         if not candidates:
             logger.info("No buy signals detected")

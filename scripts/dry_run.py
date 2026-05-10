@@ -11,12 +11,15 @@ and sends nothing to Slack (unless --notify flag is passed).
 
 import argparse
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import os
+
+import numpy as np
+import pandas as pd
 
 os.environ.setdefault("DRY_RUN", "true")
 
@@ -30,7 +33,79 @@ def parse_args():
     p.add_argument("--date", help="Simulate date (YYYY-MM-DD)", default=None)
     p.add_argument("--notify", action="store_true", help="Send real Slack notifications")
     p.add_argument("--verbose", action="store_true", help="DEBUG logging")
+    p.add_argument("--synthetic", action="store_true",
+                   help="Use synthetic market data (no yfinance needed)")
     return p.parse_args()
+
+
+class SyntheticMarketDataClient:
+    """Deterministic synthetic OHLCV — used when yfinance is rate-limited locally.
+
+    Generates ~200 trading days of well-behaved price data that passes all
+    validator checks (freshness, no NaN, no price anomalies, volume within limits).
+    The data is a steady uptrend and will NOT trigger a buy signal — the purpose
+    is to verify the pipeline runs end-to-end without errors.
+    """
+
+    def __init__(self, sim_date: date) -> None:
+        self._sim_date = sim_date
+
+    def check_connectivity(self) -> bool:
+        return True
+
+    def fetch_ohlcv(
+        self, tickers: list, start: date, end: date
+    ) -> tuple:
+        end_ts = pd.Timestamp(end)
+        # Generate 220 business days ending on or before end, then force last = end
+        raw_dates = pd.bdate_range(end=end_ts, periods=220)
+        if raw_dates[-1] != end_ts:
+            dates = pd.DatetimeIndex(list(raw_dates[:-1]) + [end_ts])
+        else:
+            dates = raw_dates
+
+        n = len(dates)
+        adj_close_data: dict = {}
+        volume_data: dict = {}
+
+        for ticker in tickers:
+            seed = abs(hash(ticker)) % (2 ** 31)
+            rng = np.random.default_rng(seed)
+
+            # Steady uptrend 300 → 450, small noise (max daily Δ << 30%)
+            prices = np.linspace(300.0, 450.0, n) + rng.normal(0, 2.0, n)
+            prices = np.clip(prices, 200.0, 900.0)
+
+            # Stable volume, today slightly elevated but << 50× median
+            vols = rng.integers(4000, 6000, n).astype(float)
+            vols[-1] = float(rng.integers(8000, 10000))
+
+            adj_close_data[ticker] = prices
+            volume_data[ticker] = vols
+
+        adj_close = pd.DataFrame(adj_close_data, index=dates)
+        volume = pd.DataFrame(volume_data, index=dates)
+
+        start_ts = pd.Timestamp(start)
+        return adj_close.loc[start_ts:], volume.loc[start_ts:]
+
+    def fetch_fundamentals(self, tickers: list) -> pd.DataFrame:
+        records = [
+            {
+                "ticker": t,
+                "market_cap_jpy": 50_000_000_000,   # ¥500 billion
+                "pbr": 0.8,                           # within [0.5, 1.2]
+                "equity_ratio": 0.40,                 # above 0.30
+                "avg_5d_trading_value_jpy": 500_000_000,  # ¥500M
+            }
+            for t in tickers
+        ]
+        if not records:
+            return pd.DataFrame()
+        return pd.DataFrame(records).set_index("ticker")
+
+    def fetch_ohlcv_full(self, tickers: list, start: date, end: date) -> pd.DataFrame:
+        return pd.DataFrame()
 
 
 class FakeClock:
@@ -108,7 +183,12 @@ def main():
     notifier = NoOpNotifier() if not args.notify else None
     state_repo = NoOpStateRepository()
     validator = DataValidator()
-    market_data = _DryRunYFinanceClient(validator=validator)
+
+    if args.synthetic:
+        market_data = SyntheticMarketDataClient(sim_date)
+        print("[synthetic] Using SyntheticMarketDataClient — no yfinance calls")
+    else:
+        market_data = _DryRunYFinanceClient(validator=validator)
 
     if notifier is None:
         from squant.infrastructure.slack_notifier import SlackNotifier
