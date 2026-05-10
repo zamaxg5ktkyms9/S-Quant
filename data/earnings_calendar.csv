@@ -1,0 +1,8 @@
+# Earnings & record date blackout calendar
+# System will block entry ±3 trading days from each event_date
+# event_type: "earnings" | "record_date" | "ex_dividend"
+# Last updated: 2026-05-10 (update quarterly)
+ticker,event_date,event_type,note
+# Example entries (replace with actual schedule):
+# 7203.T,2026-05-12,earnings,FY2025 Q4 results
+# 6758.T,2026-05-13,earnings,FY2025 Q4 results

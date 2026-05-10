@@ -1,0 +1,286 @@
+"""Daily runner — state machine dispatcher and top-level error boundary."""
+
+import traceback
+import uuid
+from dataclasses import dataclass
+from datetime import date
+
+from squant.config.settings import Settings
+from squant.domain import circuit_breaker as cb_module
+from squant.domain.enums import SystemState
+from squant.domain.exceptions import DataQualityError, SQuantError
+from squant.domain.models import PortfolioState, RunRecord
+from squant.infrastructure.interfaces import IClock, IMarketDataClient, INotifier, IStateRepository
+from squant.presentation.slack_formatter import format_circuit_breaker
+from squant.utils.jst import is_tse_trading_day
+from squant.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+@dataclass
+class RunResult:
+    success: bool
+    run_id: str
+    state_before: SystemState
+    state_after: SystemState | None
+    note: str = ""
+
+
+class DailyRunner:
+    def __init__(
+        self,
+        state_repo: IStateRepository,
+        market_data: IMarketDataClient,
+        notifier: INotifier,
+        clock: IClock,
+        settings: Settings,
+        idle_pipeline: "IdlePipeline",          # type: ignore[name-defined]  # noqa: F821
+        holding_pipeline: "HoldingPipeline",    # type: ignore[name-defined]  # noqa: F821
+        settling_pipeline: "SettlingPipeline",  # type: ignore[name-defined]  # noqa: F821
+    ) -> None:
+        self._repo = state_repo
+        self._data = market_data
+        self._notifier = notifier
+        self._clock = clock
+        self._settings = settings
+        self._idle = idle_pipeline
+        self._holding = holding_pipeline
+        self._settling = settling_pipeline
+
+    def run(self) -> RunResult:
+        run_id = str(uuid.uuid4())[:8]
+        today = self._clock.today_jst()
+        state_before: SystemState | None = None
+
+        try:
+            # Skip on non-trading days (handles holidays, weekends)
+            if not is_tse_trading_day(today):
+                logger.info(f"{today} is not a TSE trading day — skipping")
+                return RunResult(
+                    success=True, run_id=run_id,
+                    state_before=SystemState.IDLE, state_after=None,
+                    note="non-trading day",
+                )
+
+            # Idempotency guard
+            if self._repo.has_run_today(today):
+                logger.info(f"Already ran successfully today ({today}) — skipping")
+                return RunResult(
+                    success=True, run_id=run_id,
+                    state_before=SystemState.IDLE, state_after=None,
+                    note="already ran today",
+                )
+
+            # Check external connectivity
+            self._check_prerequisites()
+
+            # Load state
+            portfolio = self._repo.load_portfolio()
+            state_before = portfolio.state
+
+            # Reconcile state (time-driven, safe even after missed runs)
+            portfolio = self._reconcile(portfolio, today, run_id)
+
+            # Circuit breaker check
+            cb_status = self._repo.load_circuit_breaker()
+            if cb_module.is_tripped(cb_status):
+                logger.warning("Circuit breaker tripped — halting all operations")
+                text, blocks = format_circuit_breaker()
+                self._notifier.send(text, blocks)
+                self._repo.mark_run_complete(
+                    RunRecord(run_id=run_id, run_date=today, status="success", note="cb_tripped")
+                )
+                return RunResult(
+                    success=True, run_id=run_id,
+                    state_before=state_before, state_after=portfolio.state,
+                    note="circuit_breaker_tripped",
+                )
+
+            # Dispatch to state-appropriate pipeline
+            logger.info(f"State: {portfolio.state.value} | run_id={run_id}")
+            new_portfolio = self._dispatch(portfolio, run_id)
+
+            # Persist final state
+            if not self._settings.dry_run:
+                self._repo.mark_run_complete(
+                    RunRecord(run_id=run_id, run_date=today, status="success")
+                )
+
+            return RunResult(
+                success=True, run_id=run_id,
+                state_before=state_before, state_after=new_portfolio.state,
+            )
+
+        except DataQualityError as e:
+            logger.error(f"Data quality abort: {e}")
+            self._notifier.send_error("データ品質エラー — 取引中止", str(e))
+            self._repo.mark_run_complete(
+                RunRecord(run_id=run_id, run_date=today, status="error", note=str(e)[:200])
+            )
+            return RunResult(
+                success=False, run_id=run_id,
+                state_before=state_before or SystemState.IDLE, state_after=None,
+                note=str(e),
+            )
+
+        except SQuantError as e:
+            logger.error(f"S-Quant error: {e}")
+            self._notifier.send_error("システムエラー", str(e))
+            self._repo.mark_run_complete(
+                RunRecord(run_id=run_id, run_date=today, status="error", note=str(e)[:200])
+            )
+            return RunResult(
+                success=False, run_id=run_id,
+                state_before=state_before or SystemState.IDLE, state_after=None,
+                note=str(e),
+            )
+
+        except Exception as e:
+            tb = traceback.format_exc()
+            logger.error(f"Unexpected error: {e}\n{tb}")
+            self._notifier.send_error("予期しないエラー", f"{type(e).__name__}: {e}\n\n{tb[:800]}")
+            import contextlib
+            with contextlib.suppress(Exception):
+                self._repo.mark_run_complete(
+                    RunRecord(run_id=run_id, run_date=today, status="error", note=str(e)[:200])
+                )
+            return RunResult(
+                success=False, run_id=run_id,
+                state_before=state_before or SystemState.IDLE, state_after=None,
+                note=str(e),
+            )
+
+    def _check_prerequisites(self) -> None:
+        """Abort early if external services are unreachable."""
+        from squant.domain.exceptions import SheetsError
+
+        if hasattr(self._repo, "_c") and hasattr(self._repo._c, "check_connectivity") and not self._repo._c.check_connectivity():  # type: ignore[union-attr]
+            raise SheetsError("Google Sheets is unreachable — cannot read state safely")
+
+        if hasattr(self._data, "check_connectivity") and not self._data.check_connectivity():  # type: ignore[union-attr]
+            from squant.domain.exceptions import DataQualityError
+            raise DataQualityError("yfinance is unreachable")
+
+    def _reconcile(self, portfolio: PortfolioState, today: date, run_id: str) -> PortfolioState:
+        """Apply time-driven state corrections (safe after GHA missed runs)."""
+        if portfolio.state == SystemState.SETTLING and portfolio.settle_date:
+            from squant.utils.jst import is_settlement_unlocked
+            if is_settlement_unlocked(portfolio.settle_date, today):
+                logger.info("Reconcile: SETTLING → IDLE (settle_date passed)")
+                new = PortfolioState(
+                    state=SystemState.IDLE,
+                    cash_jpy=portfolio.cash_jpy,
+                    last_run_id=run_id,
+                    cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
+                )
+                if not self._settings.dry_run:
+                    self._repo.save_portfolio(new)
+                return new
+
+        if portfolio.state == SystemState.HOLDING and portfolio.position:
+            from squant.utils.jst import count_trading_days
+            days = count_trading_days(portfolio.position.entry_date, today)
+            if days >= 5:
+                logger.warning(f"Reconcile: position {portfolio.position.ticker} hit time-stop during missed run")
+
+        return portfolio
+
+    def _dispatch(self, portfolio: PortfolioState, run_id: str) -> PortfolioState:
+        if portfolio.state in (SystemState.IDLE, SystemState.SIGNAL_SENT):
+            # SIGNAL_SENT: check operator confirmation before issuing new signal
+            if portfolio.state == SystemState.SIGNAL_SENT:
+                pending = self._repo.load_pending_signal()
+                if pending is not None:
+                    from squant.domain.enums import ExecutionStatus
+                    if pending.execution_status == ExecutionStatus.FILLED:
+                        return self._confirm_entry(portfolio, pending, run_id)
+                    elif pending.execution_status == ExecutionStatus.CANCELLED:
+                        logger.info("Operator cancelled signal — returning to IDLE")
+                        new = PortfolioState(
+                            state=SystemState.IDLE,
+                            cash_jpy=portfolio.cash_jpy,
+                            last_run_id=run_id,
+                            cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
+                        )
+                        if not self._settings.dry_run:
+                            self._repo.save_portfolio(new)
+                        return new
+                    else:
+                        # Still pending — timeout check (1 trading day)
+                        if pending.signal.generated_at.date() < self._clock.today_jst():
+                            logger.warning("Signal timed out with no operator response — reverting to IDLE")
+                            new = PortfolioState(
+                                state=SystemState.IDLE,
+                                cash_jpy=portfolio.cash_jpy,
+                                last_run_id=run_id,
+                                cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
+                            )
+                            if not self._settings.dry_run:
+                                self._repo.save_portfolio(new)
+                                self._repo.cancel_pending_signal()
+                            self._notifier.send(
+                                f"[S-Quant] オペレータ応答なし — IDLEに戻りました\n"
+                                f"（{pending.signal.ticker} の注文は未確認のため発注なしとみなします）"
+                            )
+                            return new
+                        return portfolio  # still same day, wait
+
+            return self._idle.run(portfolio, run_id)
+
+        elif portfolio.state == SystemState.HOLDING:
+            return self._holding.run(portfolio, run_id)
+
+        elif portfolio.state == SystemState.SETTLING:
+            return self._settling.run(portfolio, run_id)
+
+        else:
+            logger.error(f"Unknown state: {portfolio.state}")
+            return portfolio
+
+    def _confirm_entry(
+        self, portfolio: PortfolioState, pending: "PendingSignal", run_id: str  # type: ignore[name-defined]  # noqa: F821
+    ) -> PortfolioState:
+        """Transition SIGNAL_SENT → HOLDING using operator-confirmed fill."""
+        from squant.domain.models import Position
+        from squant.domain.quantity_calculator import compute_stop_loss_price
+        from squant.utils.jst import add_trading_days
+
+        sig = pending.signal
+        actual_price = pending.actual_entry_price or sig.reference_price
+        actual_shares = pending.actual_shares or sig.shares
+
+        today = self._clock.today_jst()
+        time_stop = add_trading_days(today, 5)
+        stop_loss = compute_stop_loss_price(actual_price, self._settings.stop_loss_rate)
+
+        position = Position(
+            ticker=sig.ticker,
+            shares=actual_shares,
+            entry_price=actual_price,
+            intended_entry_price=sig.reference_price,
+            entry_date=today,
+            stop_loss_price=stop_loss,
+            trailing_stop_price=stop_loss,
+            highest_price_since_entry=actual_price,
+            time_stop_date=time_stop,
+        )
+
+        cost = actual_price * actual_shares
+        new_portfolio = PortfolioState(
+            state=SystemState.HOLDING,
+            cash_jpy=portfolio.cash_jpy - cost,
+            position=position,
+            last_run_id=run_id,
+            cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
+        )
+
+        if not self._settings.dry_run:
+            self._repo.save_portfolio(new_portfolio)
+
+        logger.info(f"Entry confirmed: {sig.ticker} ×{actual_shares} @ ¥{actual_price}")
+        self._notifier.send(
+            f"[S-Quant] エントリー確認 — {sig.ticker} ×{actual_shares}株 @ ¥{actual_price}\n"
+            f"損切ライン: ¥{int(stop_loss)} | タイムストップ: {time_stop}"
+        )
+        return new_portfolio
