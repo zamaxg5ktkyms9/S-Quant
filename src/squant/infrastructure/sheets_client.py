@@ -16,6 +16,8 @@ _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 class GoogleSheetsClient:
     def __init__(self, sa_key_json: str, spreadsheet_id: str) -> None:
         self._spreadsheet_id = spreadsheet_id
+        # Strip surrounding quotes in case the secret was registered with them
+        sa_key_json = sa_key_json.strip("'\"")
         creds = Credentials.from_service_account_info(
             json.loads(sa_key_json), scopes=_SCOPES
         )

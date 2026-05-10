@@ -30,6 +30,10 @@ def main() -> int:
     validator = DataValidator()
     market_data = YFinanceClient(validator=validator)
 
+    if not settings.gcp_sa_key_json or not settings.spreadsheet_id:
+        logger.error("GCP_SA_KEY_JSON or SPREADSHEET_ID is not set — cannot connect to Sheets")
+        return 1
+
     sheets_client = GoogleSheetsClient(
         sa_key_json=settings.gcp_sa_key_json,
         spreadsheet_id=settings.spreadsheet_id,
