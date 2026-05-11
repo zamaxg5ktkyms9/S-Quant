@@ -12,6 +12,7 @@ class ExitReason(StrEnum):
     STOP_LOSS = "STOP_LOSS"
     TRAILING_STOP = "TRAILING_STOP"
     TIME_STOP = "TIME_STOP"
+    TAKE_PROFIT = "TAKE_PROFIT"
     MANUAL = "MANUAL"
 
 

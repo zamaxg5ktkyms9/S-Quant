@@ -5,6 +5,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date
 
+from squant.config.constants import EXECUTION_GUARD_HOUR_JST
 from squant.config.settings import Settings
 from squant.domain import circuit_breaker as cb_module
 from squant.domain.enums import SystemState
@@ -54,6 +55,20 @@ class DailyRunner:
         state_before: SystemState | None = None
 
         try:
+            # 20:00 JST execution guard — GitHub Actions runs at 20:15 JST; local runs before
+            # market data is available are rejected here.
+            now = self._clock.now_jst()
+            if now.hour < EXECUTION_GUARD_HOUR_JST:
+                logger.info(
+                    f"Execution time guard: {now.strftime('%H:%M')} JST "
+                    f"< {EXECUTION_GUARD_HOUR_JST}:00 JST — skipping"
+                )
+                return RunResult(
+                    success=True, run_id=run_id,
+                    state_before=SystemState.IDLE, state_after=None,
+                    note=f"execution_time_guard: {now.strftime('%H:%M')} JST",
+                )
+
             # Skip on non-trading days (handles holidays, weekends)
             if not is_tse_trading_day(today):
                 logger.info(f"{today} is not a TSE trading day — skipping")

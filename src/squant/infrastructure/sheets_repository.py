@@ -30,6 +30,21 @@ from squant.utils.logging import get_logger
 logger = get_logger(__name__)
 
 _DATE_FMT = "%Y-%m-%d"
+
+
+def _parse_state_safe(raw: str) -> SystemState:
+    """Parse SystemState; on unknown/empty value log critical error and return IDLE."""
+    if not raw:
+        logger.warning("Empty system state in Sheets — defaulting to IDLE (manual review needed)")
+        return SystemState.IDLE
+    try:
+        return SystemState(raw)
+    except ValueError:
+        logger.error(
+            f"Unknown system state '{raw}' in Sheets — defaulting to IDLE. "
+            "Manual review of the portfolio sheet is required."
+        )
+        return SystemState.IDLE
 _DT_FMT = "%Y-%m-%dT%H:%M:%S%z"
 
 
@@ -101,7 +116,7 @@ class SheetsStateRepository:
                 time_stop_date=_d(r["time_stop_date"]),
             )
         return PortfolioState(
-            state=SystemState(r["state"]),
+            state=_parse_state_safe(r.get("state", "")),
             cash_jpy=Decimal(r["cash_jpy"] or "100000"),
             position=position,
             settle_date=_d(r["settle_date"]) if r.get("settle_date") else None,

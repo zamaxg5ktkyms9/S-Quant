@@ -1,0 +1,72 @@
+{
+  "description": "yfinanceレスポンスを模したMockデータ。各シナリオのパラメータを定義し、Pythonヘルパーがpandas Seriesを生成する。",
+  "end_date": "2026-05-11",
+  "scenarios": {
+    "normal": {
+      "n_bars": 100,
+      "base_price": 500.0,
+      "price_step": 0.1,
+      "base_volume": 1000000,
+      "last_price_override": null,
+      "last_volume_override": null,
+      "nan_indices": [],
+      "expected_validation": "OK",
+      "description": "100本棒の正常データ — バリデーション通過"
+    },
+    "anomaly_price_up_30pct": {
+      "n_bars": 100,
+      "base_price": 500.0,
+      "price_step": 0.1,
+      "base_volume": 1000000,
+      "last_price_override": 668.0,
+      "last_volume_override": null,
+      "nan_indices": [],
+      "expected_validation": "SKIP_TICKER",
+      "description": "前日比+32%の急騰 — ANOMALY_PRICE_CHANGE_MAX(30%)超過でSKIP"
+    },
+    "anomaly_price_down_30pct": {
+      "n_bars": 100,
+      "base_price": 500.0,
+      "price_step": 0.1,
+      "base_volume": 1000000,
+      "last_price_override": 342.0,
+      "last_volume_override": null,
+      "nan_indices": [],
+      "expected_validation": "SKIP_TICKER",
+      "description": "前日比-31%の急落 — ANOMALY_PRICE_CHANGE_MAX(30%)超過でSKIP"
+    },
+    "zero_volume": {
+      "n_bars": 100,
+      "base_price": 500.0,
+      "price_step": 0.1,
+      "base_volume": 1000000,
+      "last_price_override": null,
+      "last_volume_override": 0,
+      "nan_indices": [],
+      "expected_validation": "SKIP_TICKER",
+      "description": "最終棒の出来高ゼロ — 売買停止の可能性としてSKIP"
+    },
+    "missing_data_5pct": {
+      "n_bars": 100,
+      "base_price": 500.0,
+      "price_step": 0.1,
+      "base_volume": 1000000,
+      "last_price_override": null,
+      "last_volume_override": null,
+      "nan_indices": [0, 10, 20, 30, 40],
+      "expected_validation": "SKIP_TICKER",
+      "description": "5%のNaN — NAN_RATIO_MAX(1%)を超過するためSKIP"
+    },
+    "insufficient_history": {
+      "n_bars": 50,
+      "base_price": 500.0,
+      "price_step": 0.1,
+      "base_volume": 1000000,
+      "last_price_override": null,
+      "last_volume_override": null,
+      "nan_indices": [],
+      "expected_validation": "SKIP_TICKER",
+      "description": "50本のみ — HISTORY_DAYS_REQUIRED(90)未満でSKIP"
+    }
+  }
+}

@@ -7,8 +7,10 @@ import pytest
 from squant.domain.exceptions import InsufficientCapitalError
 from squant.domain.quantity_calculator import (
     compute_cancel_threshold,
+    compute_net_pnl,
     compute_quantity,
     compute_stop_loss_price,
+    compute_take_profit_price,
 )
 
 
@@ -111,3 +113,52 @@ class TestComputeStopLossPrice:
         entry = Decimal("800")
         stop = compute_stop_loss_price(entry, Decimal("0.025"))
         assert stop < entry
+
+
+class TestComputeTakeProfitPrice:
+    def test_spread_adjusted_target(self):
+        # entry=500, spread=0.5%, net=7%
+        # TP = 500 * 1.005 * 1.07 / 0.995 ≈ 540.38
+        tp = compute_take_profit_price(Decimal("500"))
+        assert float(tp) == pytest.approx(500 * 1.005 * 1.07 / 0.995, rel=1e-6)
+
+    def test_tp_is_higher_than_gross_7pct(self):
+        """TP must be above entry*(1+0.07) because spread costs add up."""
+        entry = Decimal("500")
+        tp = compute_take_profit_price(entry)
+        gross_7 = entry * Decimal("1.07")
+        assert tp > gross_7
+
+    def test_tp_with_900_yen_stock(self):
+        tp = compute_take_profit_price(Decimal("900"))
+        assert float(tp) == pytest.approx(900 * 1.005 * 1.07 / 0.995, rel=1e-6)
+
+
+class TestComputeNetPnl:
+    def test_profitable_trade_net_of_spread(self):
+        # Buy at 500 (effective entry = 502.5), sell at 550 (effective exit = 547.25)
+        # net_per_share = 547.25 - 502.5 = 44.75; total = 44.75 * 100 = 4475
+        pnl = compute_net_pnl(
+            entry_price=Decimal("500"),
+            exit_price=Decimal("550"),
+            shares=100,
+        )
+        expected = (Decimal("550") * Decimal("0.995") - Decimal("500") * Decimal("1.005")) * 100
+        assert pnl == pytest.approx(float(expected), rel=1e-6)
+
+    def test_losing_trade_is_negative(self):
+        pnl = compute_net_pnl(
+            entry_price=Decimal("500"),
+            exit_price=Decimal("480"),
+            shares=50,
+        )
+        assert float(pnl) < 0
+
+    def test_breakeven_at_entry_is_loss_after_spread(self):
+        """Selling at entry price always loses due to spread on both legs."""
+        pnl = compute_net_pnl(
+            entry_price=Decimal("500"),
+            exit_price=Decimal("500"),
+            shares=100,
+        )
+        assert float(pnl) < 0

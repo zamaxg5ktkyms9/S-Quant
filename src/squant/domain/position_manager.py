@@ -9,6 +9,7 @@ from squant.config.constants import ATR_TRAILING_MULTIPLIER, GAP_UP_CANCEL_THRES
 from squant.domain.enums import ExitReason
 from squant.domain.indicators import atr
 from squant.domain.models import ExitDecision, Position
+from squant.domain.quantity_calculator import compute_take_profit_price
 from squant.utils.jst import count_trading_days
 
 
@@ -22,7 +23,11 @@ def evaluate_exit(
 ) -> ExitDecision:
     """Determine if the position should be exited and compute updated trailing stop.
 
-    Returns ExitDecision with should_exit=True and the exit reason if any rule triggers.
+    Exit priority:
+    1. Time stop (5 trading days) — always honoured first
+    2. Hard stop-loss — emergency floor
+    3. Trailing stop — trend-following floor
+    4. Take-profit (net +7% after S-share spread) — reward capture
     """
     # 1. Time stop: 5 trading days elapsed
     days_held = count_trading_days(position.entry_date, today)
@@ -54,6 +59,19 @@ def evaluate_exit(
             should_exit=True,
             reason=ExitReason.TRAILING_STOP,
             note=f"Close ¥{latest_close} ≤ trailing stop ¥{effective_stop}",
+            updated_trailing_stop=updated_trailing,
+        )
+
+    # 5. Take-profit check — net +7% after S-share spread on both legs
+    tp_price = compute_take_profit_price(position.entry_price)
+    if latest_close >= tp_price:
+        return ExitDecision(
+            should_exit=True,
+            reason=ExitReason.TAKE_PROFIT,
+            note=(
+                f"Close ¥{latest_close} ≥ take-profit ¥{round(tp_price, 1)} "
+                "(net +7% after S株スプレッド)"
+            ),
             updated_trailing_stop=updated_trailing,
         )
 

@@ -39,7 +39,7 @@ def main() -> int:
         spreadsheet_id=settings.spreadsheet_id,
     )
     state_repo = SheetsStateRepository(sheets_client)
-    notifier = SlackNotifier(settings.slack_webhook_url)
+    notifier = SlackNotifier(settings.slack_webhook_url, dry_run=settings.dry_run)
 
     universe = load_universe()
     blackouts = load_earnings_blackouts(as_of=clock.today_jst())

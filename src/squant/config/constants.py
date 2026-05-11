@@ -39,6 +39,12 @@ ANOMALY_PRICE_CHANGE_MAX = 0.30            # ±30% daily move → skip ticker
 VOLUME_SPIKE_MAX_RATIO = 50.0              # > 50× 20-day median → skip
 NAN_RATIO_MAX = 0.01                       # > 1% NaN → skip
 
+# --- S-share (S株) specific ---
+SSHARE_SPREAD_RATE = Decimal("0.005")          # 0.5% implicit spread (ask/bid) at SBI S株
+
+# --- Execution guard ---
+EXECUTION_GUARD_HOUR_JST = 20                  # only run at or after 20:00 JST
+
 # --- Settlement ---
 T2_SETTLEMENT_DAYS = 2
 
