@@ -114,22 +114,10 @@ class YFinanceClient:
         return df
 
     def check_connectivity(self) -> bool:
-        """Quick canary check — return False if yfinance is unreachable."""
-        try:
-            end = date.today()
-            start = end - timedelta(days=5)
-            raw = yf.download(
-                _CANARY,
-                start=start.isoformat(),
-                end=(end + timedelta(days=1)).isoformat(),
-                auto_adjust=False,
-                progress=False,
-                threads=False,
-            )
-            return not raw.empty
-        except Exception as e:
-            logger.error(f"yfinance connectivity check failed: {e}")
-            return False
+        """Skip pre-flight canary — a separate yf.download call burns rate-limit quota
+        before the bulk fetch and has no retry. Actual connectivity failures are handled
+        by the retry decorator on _download (3 attempts, 30-90 s backoff)."""
+        return True
 
     @with_retry(max_attempts=2, min_wait=1.0, max_wait=5.0)
     def _fetch_ticker_info(self, ticker: str) -> dict:
