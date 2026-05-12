@@ -175,7 +175,8 @@ class DailyRunner:
 
         if hasattr(self._data, "check_connectivity") and not self._data.check_connectivity():  # type: ignore[union-attr]
             from squant.domain.exceptions import DataQualityError
-            raise DataQualityError("yfinance is unreachable")
+            data_name = type(self._data).__name__
+            raise DataQualityError(f"{data_name} is unreachable — check API credentials")
 
     def _reconcile(self, portfolio: PortfolioState, today: date, run_id: str) -> PortfolioState:
         """Apply time-driven state corrections (safe after GHA missed runs)."""
