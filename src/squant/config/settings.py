@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     gcp_sa_key_json: str = Field(default="", alias="GCP_SA_KEY_JSON")
     spreadsheet_id: str = Field(default="", alias="SPREADSHEET_ID")
 
+    # J-Quants (JPX official market data — replaces yfinance)
+    jquants_email: str = Field(default="", alias="JQUANTS_EMAIL")
+    jquants_password: str = Field(default="", alias="JQUANTS_PASSWORD")
+
     # Slack
     slack_webhook_url: str = Field(default="", alias="SLACK_WEBHOOK_URL")
 

@@ -10,6 +10,7 @@ from squant.application.universe_loader import load_earnings_blackouts, load_uni
 from squant.config.settings import get_settings
 from squant.infrastructure.clock import SystemClock
 from squant.infrastructure.data_validator import DataValidator
+from squant.infrastructure.jquants_client import JQuantsClient
 from squant.infrastructure.sheets_client import GoogleSheetsClient
 from squant.infrastructure.sheets_repository import SheetsStateRepository
 from squant.infrastructure.slack_notifier import SlackNotifier
@@ -28,7 +29,16 @@ def main() -> int:
 
     clock = SystemClock()
     validator = DataValidator()
-    market_data = YFinanceClient(validator=validator)
+
+    if settings.jquants_email and settings.jquants_password:
+        logger.info("Using J-Quants as market data source")
+        market_data = JQuantsClient(
+            email=settings.jquants_email,
+            password=settings.jquants_password,
+        )
+    else:
+        logger.warning("JQUANTS_EMAIL/PASSWORD not set — falling back to yfinance (unreliable on cloud)")
+        market_data = YFinanceClient(validator=validator)
 
     if not settings.gcp_sa_key_json or not settings.spreadsheet_id:
         logger.error("GCP_SA_KEY_JSON or SPREADSHEET_ID is not set — cannot connect to Sheets")

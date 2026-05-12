@@ -16,11 +16,13 @@ on:
 jobs:
   trade:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       GCP_SA_KEY_JSON: ${{ secrets.GCP_SA_KEY_JSON }}
       SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      JQUANTS_EMAIL: ${{ secrets.JQUANTS_EMAIL }}
+      JQUANTS_PASSWORD: ${{ secrets.JQUANTS_PASSWORD }}
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
 
     steps:
