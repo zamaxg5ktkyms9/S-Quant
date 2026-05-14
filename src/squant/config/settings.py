@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # J-Quants v2 (JPX official market data — API key from dashboard)
     jquants_api_key: str = Field(default="", alias="JQUANTS_API_KEY")
-    jquants_rpm: int = Field(default=60, alias="JQUANTS_RPM")
+    jquants_rpm: int = Field(default=50, alias="JQUANTS_RPM")
 
     # Slack
     slack_webhook_url: str = Field(default="", alias="SLACK_WEBHOOK_URL")

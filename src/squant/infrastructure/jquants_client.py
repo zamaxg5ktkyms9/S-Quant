@@ -2,6 +2,10 @@
 
 Auth: API key via x-api-key header (v2, registered 2025-12-22+).
 Docs: https://jpx-jquants.com/spec
+
+Rate limiting: J-Quants counts per clock-minute (not sliding window).
+Default RPM=50 keeps 17% below the Light-plan 60/min limit, preventing
+the 429 → 5-minute block cascade.
 """
 
 import threading
@@ -18,30 +22,47 @@ logger = get_logger(__name__)
 
 _BASE_URL = "https://api.jquants.com/v2"
 _MAX_WORKERS = 8
+_429_BACKOFF_SECONDS = 65.0  # slightly over 1 minute to clear the clock-minute window
 
 
 class _RateLimiter:
-    """Thread-safe minimum-interval rate limiter."""
+    """Thread-safe per-request rate limiter with global 429 backoff."""
 
     def __init__(self, rpm: int) -> None:
         self._interval = 60.0 / max(rpm, 1)
         self._lock = threading.Lock()
         self._last: float = 0.0
+        self._backoff_until: float = 0.0
 
     def wait(self) -> None:
         with self._lock:
+            now = time.monotonic()
+            # Honour global backoff (triggered by any 429 response)
+            if now < self._backoff_until:
+                wait_for = self._backoff_until - now
+                logger.info(f"J-Quants rate backoff: waiting {wait_for:.0f}s")
+                time.sleep(wait_for)
+
             now = time.monotonic()
             gap = self._interval - (now - self._last)
             if gap > 0:
                 time.sleep(gap)
             self._last = time.monotonic()
 
+    def set_backoff(self, seconds: float = _429_BACKOFF_SECONDS) -> None:
+        """Called by any worker that receives a 429; all workers will then pause."""
+        with self._lock:
+            until = time.monotonic() + seconds
+            if until > self._backoff_until:
+                self._backoff_until = until
+                logger.warning(f"J-Quants 429 — setting global backoff for {seconds:.0f}s")
+
 
 class JQuantsClient:
-    def __init__(self, api_key: str, requests_per_minute: int = 60) -> None:
+    def __init__(self, api_key: str, requests_per_minute: int = 50) -> None:
         self._api_key = api_key
         self._limiter = _RateLimiter(requests_per_minute)
-        # Cache full daily_quotes DataFrame per ticker within one run;
+        # Cache full daily DataFrame per ticker within one run;
         # used by fetch_fundamentals to derive Va (trading value) stats.
         self._ohlcv_cache: dict[str, pd.DataFrame] = {}
 
@@ -61,41 +82,48 @@ class JQuantsClient:
 
     def _fetch_daily_quotes(self, ticker: str, start: date, end: date) -> pd.DataFrame | None:
         code = self._to_code(ticker)
-        rows: list[dict] = []
-        pagination_key: str | None = None
 
-        while True:
-            params: dict = {"code": code, "from": start.isoformat(), "to": end.isoformat()}
-            if pagination_key:
-                params["pagination_key"] = pagination_key
+        for attempt in range(2):  # one retry after a 429 backoff
+            rows: list[dict] = []
+            pagination_key: str | None = None
+            ok = True
 
-            self._limiter.wait()
-            try:
-                resp = httpx.get(
-                    f"{_BASE_URL}/equities/bars/daily",
-                    params=params,
-                    headers=self._headers(),
-                    timeout=30,
-                )
-            except Exception as e:
-                logger.debug(f"J-Quants network error for {ticker}: {e}")
-                return None
+            while True:
+                params: dict = {"code": code, "from": start.isoformat(), "to": end.isoformat()}
+                if pagination_key:
+                    params["pagination_key"] = pagination_key
 
-            if resp.status_code == 429:
-                logger.warning(f"J-Quants rate limit ({resp.status_code}) for {ticker}")
-                return None
-            if resp.status_code in (401, 403):
-                logger.error(f"J-Quants API key rejected ({resp.status_code}): {resp.text[:200]}")
-                return None
-            if not resp.is_success:
-                logger.debug(f"J-Quants HTTP {resp.status_code} for {ticker}")
-                return None
+                self._limiter.wait()
+                try:
+                    resp = httpx.get(
+                        f"{_BASE_URL}/equities/bars/daily",
+                        params=params,
+                        headers=self._headers(),
+                        timeout=30,
+                    )
+                except Exception as e:
+                    logger.debug(f"J-Quants network error for {ticker}: {e}")
+                    return None
 
-            body = resp.json()
-            rows.extend(body.get("data", []))
-            pagination_key = body.get("pagination_key") or None
-            if not pagination_key:
-                break
+                if resp.status_code == 429:
+                    self._limiter.set_backoff()
+                    ok = False
+                    break  # break pagination loop → retry outer loop
+                if resp.status_code in (401, 403):
+                    logger.error(f"J-Quants API key rejected ({resp.status_code}): {resp.text[:200]}")
+                    return None
+                if not resp.is_success:
+                    logger.debug(f"J-Quants HTTP {resp.status_code} for {ticker}")
+                    return None
+
+                body = resp.json()
+                rows.extend(body.get("data", []))
+                pagination_key = body.get("pagination_key") or None
+                if not pagination_key:
+                    break
+
+            if ok:
+                break  # success — no need to retry
 
         if not rows:
             return None
@@ -135,9 +163,7 @@ class JQuantsClient:
         if not adj_close_map:
             return pd.DataFrame(), pd.DataFrame()
 
-        adj_close = pd.DataFrame(adj_close_map)
-        volume = pd.DataFrame(volume_map)
-        return adj_close, volume
+        return pd.DataFrame(adj_close_map), pd.DataFrame(volume_map)
 
     def fetch_ohlcv_full(
         self, tickers: list[str], start: date, end: date
