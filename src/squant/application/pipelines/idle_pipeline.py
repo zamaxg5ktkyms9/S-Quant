@@ -92,11 +92,15 @@ class IdlePipeline:
         filtered_df = screener.apply_fundamental_filters(
             valid_tickers, adj_close, fundamentals, today, self._blackouts
         )
-        filtered_df = screener.exclude_recent_sales(
-            filtered_df, forbidden
-        )
         if filtered_df.empty:
             logger.info("No candidates after fundamental screening")
+            text, blocks = format_no_signal()
+            self._notifier.send(text, blocks)
+            return portfolio
+
+        filtered_df = screener.exclude_recent_sales(filtered_df, forbidden)
+        if filtered_df.empty:
+            logger.info("No candidates after recent-sales exclusion")
             text, blocks = format_no_signal()
             self._notifier.send(text, blocks)
             return portfolio

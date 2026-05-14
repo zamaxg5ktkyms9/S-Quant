@@ -175,23 +175,33 @@ class JQuantsClient:
     def _fetch_latest_fins_summary(self, ticker: str) -> dict:
         """Return most-recently-disclosed fins/summary dict (or {})."""
         code = self._to_code(ticker)
-        try:
-            self._limiter.wait()
-            resp = httpx.get(
-                f"{_BASE_URL}/fins/summary",
-                params={"code": code},
-                headers=self._headers(),
-                timeout=30,
-            )
+        for attempt in range(2):  # one retry after a 429 backoff
+            try:
+                self._limiter.wait()
+                resp = httpx.get(
+                    f"{_BASE_URL}/fins/summary",
+                    params={"code": code},
+                    headers=self._headers(),
+                    timeout=30,
+                )
+            except Exception as e:
+                logger.debug(f"J-Quants fins/summary error for {ticker}: {e}")
+                return {}
+
+            if resp.status_code == 429:
+                self._limiter.set_backoff()
+                if attempt == 0:
+                    continue
+                return {}
             if not resp.is_success:
                 return {}
+
             records: list[dict] = resp.json().get("data", [])
             if not records:
                 return {}
             return max(records, key=lambda r: r.get("DisclosedDate", "") or "")
-        except Exception as e:
-            logger.debug(f"J-Quants fins/summary error for {ticker}: {e}")
-            return {}
+
+        return {}
 
     def fetch_fundamentals(self, tickers: list[str]) -> pd.DataFrame:
         """Derive market_cap, PBR, equity_ratio, avg_5d_trading_value from J-Quants v2."""
