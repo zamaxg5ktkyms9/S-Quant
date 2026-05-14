@@ -30,14 +30,14 @@ def main() -> int:
     clock = SystemClock()
     validator = DataValidator()
 
-    if settings.jquants_email and settings.jquants_password:
-        logger.info("Using J-Quants as market data source")
+    if settings.jquants_api_key:
+        logger.info(f"Using J-Quants v2 as market data source (rpm={settings.jquants_rpm})")
         market_data = JQuantsClient(
-            email=settings.jquants_email,
-            password=settings.jquants_password,
+            api_key=settings.jquants_api_key,
+            requests_per_minute=settings.jquants_rpm,
         )
     else:
-        logger.warning("JQUANTS_EMAIL/PASSWORD not set — falling back to yfinance (unreliable on cloud)")
+        logger.warning("JQUANTS_API_KEY not set — falling back to yfinance (unreliable on cloud)")
         market_data = YFinanceClient(validator=validator)
 
     if not settings.gcp_sa_key_json or not settings.spreadsheet_id:

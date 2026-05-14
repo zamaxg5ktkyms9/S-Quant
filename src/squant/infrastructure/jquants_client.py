@@ -1,5 +1,10 @@
-"""J-Quants (JPX official API) market data client — replaces yfinance."""
+"""J-Quants v2 (JPX official API) market data client.
 
+Auth: API key via x-api-key header (v2, registered 2025-12-22+).
+Docs: https://jpx-jquants.com/spec
+"""
+
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
@@ -11,49 +16,39 @@ from squant.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-_BASE_URL = "https://api.jquants.com/v1"
-_MAX_WORKERS = 8  # concurrent requests; stay well within J-Quants rate limits
+_BASE_URL = "https://api.jquants.com/v2"
+_MAX_WORKERS = 8
+
+
+class _RateLimiter:
+    """Thread-safe minimum-interval rate limiter."""
+
+    def __init__(self, rpm: int) -> None:
+        self._interval = 60.0 / max(rpm, 1)
+        self._lock = threading.Lock()
+        self._last: float = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            gap = self._interval - (now - self._last)
+            if gap > 0:
+                time.sleep(gap)
+            self._last = time.monotonic()
 
 
 class JQuantsClient:
-    def __init__(self, email: str, password: str) -> None:
-        self._email = email
-        self._password = password
-        self._id_token: str | None = None
-        self._token_expires_at: float = 0.0
+    def __init__(self, api_key: str, requests_per_minute: int = 60) -> None:
+        self._api_key = api_key
+        self._limiter = _RateLimiter(requests_per_minute)
         # Cache full daily_quotes DataFrame per ticker within one run;
-        # used by fetch_fundamentals to derive TurnoverValue stats.
+        # used by fetch_fundamentals to derive Va (trading value) stats.
         self._ohlcv_cache: dict[str, pd.DataFrame] = {}
 
-    # ── Authentication ─────────────────────────────────────────────────────────
-
-    def _ensure_token(self) -> str:
-        if self._id_token and time.monotonic() < self._token_expires_at:
-            return self._id_token
-        self._id_token = self._acquire_id_token()
-        self._token_expires_at = time.monotonic() + 23 * 3600  # 24 h validity; refresh 1 h early
-        logger.info("J-Quants ID token acquired")
-        return self._id_token
-
-    def _acquire_id_token(self) -> str:
-        r1 = httpx.post(
-            f"{_BASE_URL}/token/auth_user",
-            json={"mailaddress": self._email, "password": self._password},
-            timeout=30,
-        )
-        r1.raise_for_status()
-        refresh_token: str = r1.json()["refreshToken"]
-
-        r2 = httpx.post(
-            f"{_BASE_URL}/token/auth_refresh",
-            params={"refreshtoken": refresh_token},
-            timeout=30,
-        )
-        r2.raise_for_status()
-        return r2.json()["idToken"]
+    # ── Headers ────────────────────────────────────────────────────────────────
 
     def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self._ensure_token()}"}
+        return {"x-api-key": self._api_key}
 
     # ── Ticker format ──────────────────────────────────────────────────────────
 
@@ -74,9 +69,10 @@ class JQuantsClient:
             if pagination_key:
                 params["pagination_key"] = pagination_key
 
+            self._limiter.wait()
             try:
                 resp = httpx.get(
-                    f"{_BASE_URL}/prices/daily_quotes",
+                    f"{_BASE_URL}/equities/bars/daily",
                     params=params,
                     headers=self._headers(),
                     timeout=30,
@@ -85,15 +81,18 @@ class JQuantsClient:
                 logger.debug(f"J-Quants network error for {ticker}: {e}")
                 return None
 
-            if resp.status_code in (429, 503):
+            if resp.status_code == 429:
                 logger.warning(f"J-Quants rate limit ({resp.status_code}) for {ticker}")
+                return None
+            if resp.status_code in (401, 403):
+                logger.error(f"J-Quants API key rejected ({resp.status_code}): {resp.text[:200]}")
                 return None
             if not resp.is_success:
                 logger.debug(f"J-Quants HTTP {resp.status_code} for {ticker}")
                 return None
 
             body = resp.json()
-            rows.extend(body.get("daily_quotes", []))
+            rows.extend(body.get("data", []))
             pagination_key = body.get("pagination_key") or None
             if not pagination_key:
                 break
@@ -109,7 +108,6 @@ class JQuantsClient:
         self, tickers: list[str], start: date, end: date
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Return (adj_close_df, volume_df) — tickers as columns, dates as index."""
-        self._ensure_token()
         self._ohlcv_cache.clear()
 
         adj_close_map: dict[str, pd.Series] = {}
@@ -127,10 +125,11 @@ class JQuantsClient:
                     continue
                 self._ohlcv_cache[ticker] = df
 
-                adj_col = "AdjustmentClose" if "AdjustmentClose" in df.columns else "Close"
+                # v2 column names: AdjC (adjusted close), AdjVo (adjusted volume)
+                adj_col = "AdjC" if "AdjC" in df.columns else "C"
                 adj_close_map[ticker] = df[adj_col].rename(ticker)
 
-                vol_col = "AdjustmentVolume" if "AdjustmentVolume" in df.columns else "Volume"
+                vol_col = "AdjVo" if "AdjVo" in df.columns else "Vo"
                 volume_map[ticker] = df[vol_col].rename(ticker)
 
         if not adj_close_map:
@@ -147,33 +146,32 @@ class JQuantsClient:
 
     # ── Fundamentals ───────────────────────────────────────────────────────────
 
-    def _fetch_latest_statement(self, ticker: str) -> dict:
-        """Return most-recently-disclosed financial statement dict (or {})."""
+    def _fetch_latest_fins_summary(self, ticker: str) -> dict:
+        """Return most-recently-disclosed fins/summary dict (or {})."""
         code = self._to_code(ticker)
         try:
+            self._limiter.wait()
             resp = httpx.get(
-                f"{_BASE_URL}/fins/statements",
+                f"{_BASE_URL}/fins/summary",
                 params={"code": code},
                 headers=self._headers(),
                 timeout=30,
             )
             if not resp.is_success:
                 return {}
-            stmts: list[dict] = resp.json().get("statements", [])
-            if not stmts:
+            records: list[dict] = resp.json().get("data", [])
+            if not records:
                 return {}
-            return max(stmts, key=lambda s: s.get("DisclosedDate", ""))
+            return max(records, key=lambda r: r.get("DisclosedDate", "") or "")
         except Exception as e:
-            logger.debug(f"J-Quants statements error for {ticker}: {e}")
+            logger.debug(f"J-Quants fins/summary error for {ticker}: {e}")
             return {}
 
     def fetch_fundamentals(self, tickers: list[str]) -> pd.DataFrame:
-        """Derive market_cap, PBR, equity_ratio, avg_5d_trading_value from J-Quants."""
-        self._ensure_token()
-
+        """Derive market_cap, PBR, equity_ratio, avg_5d_trading_value from J-Quants v2."""
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
             futures = {
-                executor.submit(self._fetch_latest_statement, t): t for t in tickers
+                executor.submit(self._fetch_latest_fins_summary, t): t for t in tickers
             }
             stmt_map: dict[str, dict] = {
                 futures[f]: f.result() for f in as_completed(futures)
@@ -184,31 +182,25 @@ class JQuantsClient:
             stmt = stmt_map.get(ticker, {})
             cached = self._ohlcv_cache.get(ticker)
 
-            # ── Liquidity: avg of last 5 days TurnoverValue (yen) ──
+            # Liquidity: avg of last 5 days Va (trading value in yen, v2 field name)
             avg_5d_tv = 0.0
-            if cached is not None and "TurnoverValue" in cached.columns:
-                avg_5d_tv = float(cached["TurnoverValue"].tail(5).mean() or 0)
+            if cached is not None and "Va" in cached.columns:
+                avg_5d_tv = float(cached["Va"].tail(5).mean() or 0)
 
-            # ── Financial statement values ──
-            # J-Quants monetary fields are in JPY (yen).
-            # NetAssets / TotalAssets are balance-sheet totals.
-            net_assets = float(stmt.get("NetAssets", 0) or 0)
-            total_assets = float(stmt.get("TotalAssets", 0) or 0)
-            shares = float(
-                stmt.get("NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYear", 0) or 0
-            )
+            # v2 fins/summary balance sheet fields
+            equity_ratio = float(stmt.get("EquityRatio", 0) or 0)
             bvps = float(stmt.get("BookValuePerShare", 0) or 0)
+            equity = float(stmt.get("Equity", 0) or stmt.get("NetAssets", 0) or 0)
 
-            equity_ratio = net_assets / total_assets if total_assets > 0 else 0.0
-
-            # ── Market cap and PBR (need current close) ──
+            # Last adjusted close from OHLCV cache
             last_close = 0.0
             if cached is not None and not cached.empty:
-                close_col = "AdjustmentClose" if "AdjustmentClose" in cached.columns else "Close"
+                close_col = "AdjC" if "AdjC" in cached.columns else "C"
                 last_close = float(cached[close_col].iloc[-1])
 
-            market_cap = last_close * shares if shares > 0 and last_close > 0 else 0.0
             pbr = last_close / bvps if bvps > 0 and last_close > 0 else 0.0
+            # market_cap = pbr × equity  (since pbr = price/bvps and equity = bvps × shares)
+            market_cap = pbr * equity if pbr > 0 and equity > 0 else 0.0
 
             records.append({
                 "ticker": ticker,
@@ -224,9 +216,21 @@ class JQuantsClient:
     # ── Connectivity ───────────────────────────────────────────────────────────
 
     def check_connectivity(self) -> bool:
+        """Verify API key is valid using a known historical date (available on all plans)."""
         try:
-            self._ensure_token()
-            return True
+            self._limiter.wait()
+            resp = httpx.get(
+                f"{_BASE_URL}/equities/bars/daily",
+                params={"code": "72030", "from": "2024-01-04", "to": "2024-01-05"},
+                headers=self._headers(),
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return True
+            logger.error(
+                f"J-Quants API key check failed: HTTP {resp.status_code} — {resp.text[:300]}"
+            )
+            return False
         except Exception as e:
             logger.error(f"J-Quants connectivity check failed: {e}")
             return False
