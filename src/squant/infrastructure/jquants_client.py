@@ -199,7 +199,7 @@ class JQuantsClient:
             records: list[dict] = resp.json().get("data", [])
             if not records:
                 return {}
-            return max(records, key=lambda r: r.get("DisclosedDate", "") or "")
+            return max(records, key=lambda r: r.get("DiscDate", "") or "")
 
         return {}
 
@@ -223,10 +223,11 @@ class JQuantsClient:
             if cached is not None and "Va" in cached.columns:
                 avg_5d_tv = float(cached["Va"].tail(5).mean() or 0)
 
-            # v2 fins/summary balance sheet fields
-            equity_ratio = float(stmt.get("EquityRatio", 0) or 0)
-            bvps = float(stmt.get("BookValuePerShare", 0) or 0)
-            equity = float(stmt.get("Equity", 0) or stmt.get("NetAssets", 0) or 0)
+            # v2 fins/summary balance sheet fields (short-form keys)
+            equity_ratio = float(stmt.get("EqAR", 0) or 0)
+            bvps = float(stmt.get("BPS", 0) or 0)
+            equity = float(stmt.get("Eq", 0) or 0)
+            shares = float(stmt.get("ShOutFY", 0) or 0)
 
             # Last adjusted close from OHLCV cache
             last_close = 0.0
@@ -235,8 +236,13 @@ class JQuantsClient:
                 last_close = float(cached[close_col].iloc[-1])
 
             pbr = last_close / bvps if bvps > 0 and last_close > 0 else 0.0
-            # market_cap = pbr × equity  (since pbr = price/bvps and equity = bvps × shares)
-            market_cap = pbr * equity if pbr > 0 and equity > 0 else 0.0
+            # prefer direct shares × price; fall back to pbr × equity derivation
+            if shares > 0 and last_close > 0:
+                market_cap = shares * last_close
+            elif pbr > 0 and equity > 0:
+                market_cap = pbr * equity
+            else:
+                market_cap = 0.0
 
             records.append({
                 "ticker": ticker,
