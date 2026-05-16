@@ -168,7 +168,29 @@ class JQuantsClient:
     def fetch_ohlcv_full(
         self, tickers: list[str], start: date, end: date
     ) -> pd.DataFrame:
-        return pd.DataFrame()
+        """Return flat-column OHLCV DataFrame for holding_pipeline exit evaluation.
+
+        Columns: "Adj Close", "High", "Low", "Volume" — matches holding_pipeline expectations.
+        Only the first ticker is used (HOLDING always holds a single position).
+        """
+        if not tickers:
+            return pd.DataFrame()
+        df = self._fetch_daily_quotes(tickers[0], start, end)
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        close_col = "AdjC" if "AdjC" in df.columns else "C"
+        high_col = "AdjH" if "AdjH" in df.columns else "H"
+        low_col = "AdjL" if "AdjL" in df.columns else "L"
+        vol_col = "AdjVo" if "AdjVo" in df.columns else "Vo"
+
+        cols = [c for c in [close_col, high_col, low_col, vol_col] if c in df.columns]
+        return df[cols].rename(columns={
+            close_col: "Adj Close",
+            high_col: "High",
+            low_col: "Low",
+            vol_col: "Volume",
+        })
 
     # ── Fundamentals ───────────────────────────────────────────────────────────
 

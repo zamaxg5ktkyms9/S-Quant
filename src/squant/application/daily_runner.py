@@ -207,12 +207,37 @@ class DailyRunner:
             # SIGNAL_SENT: check operator confirmation before issuing new signal
             if portfolio.state == SystemState.SIGNAL_SENT:
                 pending = self._repo.load_pending_signal()
-                if pending is not None:
-                    from squant.domain.enums import ExecutionStatus
-                    if pending.execution_status == ExecutionStatus.FILLED:
-                        return self._confirm_entry(portfolio, pending, run_id)
-                    elif pending.execution_status == ExecutionStatus.CANCELLED:
-                        logger.info("Operator cancelled signal — returning to IDLE")
+                if pending is None:
+                    # Sheet was cleared or corrupted while in SIGNAL_SENT — reset to IDLE
+                    # rather than generating a duplicate signal.
+                    logger.warning("SIGNAL_SENT state but no pending signal in sheet — resetting to IDLE")
+                    new = PortfolioState(
+                        state=SystemState.IDLE,
+                        cash_jpy=portfolio.cash_jpy,
+                        last_run_id=run_id,
+                        cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
+                    )
+                    if not self._settings.dry_run:
+                        self._repo.save_portfolio(new)
+                    return new
+                from squant.domain.enums import ExecutionStatus
+                if pending.execution_status == ExecutionStatus.FILLED:
+                    return self._confirm_entry(portfolio, pending, run_id)
+                elif pending.execution_status == ExecutionStatus.CANCELLED:
+                    logger.info("Operator cancelled signal — returning to IDLE")
+                    new = PortfolioState(
+                        state=SystemState.IDLE,
+                        cash_jpy=portfolio.cash_jpy,
+                        last_run_id=run_id,
+                        cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
+                    )
+                    if not self._settings.dry_run:
+                        self._repo.save_portfolio(new)
+                    return new
+                else:
+                    # Still pending — timeout check (1 trading day)
+                    if pending.signal.generated_at.date() < self._clock.today_jst():
+                        logger.warning("Signal timed out with no operator response — reverting to IDLE")
                         new = PortfolioState(
                             state=SystemState.IDLE,
                             cash_jpy=portfolio.cash_jpy,
@@ -221,26 +246,13 @@ class DailyRunner:
                         )
                         if not self._settings.dry_run:
                             self._repo.save_portfolio(new)
+                            self._repo.cancel_pending_signal()
+                        self._notifier.send(
+                            f"[S-Quant] オペレータ応答なし — IDLEに戻りました\n"
+                            f"（{pending.signal.ticker} の注文は未確認のため発注なしとみなします）"
+                        )
                         return new
-                    else:
-                        # Still pending — timeout check (1 trading day)
-                        if pending.signal.generated_at.date() < self._clock.today_jst():
-                            logger.warning("Signal timed out with no operator response — reverting to IDLE")
-                            new = PortfolioState(
-                                state=SystemState.IDLE,
-                                cash_jpy=portfolio.cash_jpy,
-                                last_run_id=run_id,
-                                cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
-                            )
-                            if not self._settings.dry_run:
-                                self._repo.save_portfolio(new)
-                                self._repo.cancel_pending_signal()
-                            self._notifier.send(
-                                f"[S-Quant] オペレータ応答なし — IDLEに戻りました\n"
-                                f"（{pending.signal.ticker} の注文は未確認のため発注なしとみなします）"
-                            )
-                            return new
-                        return portfolio  # still same day, wait
+                    return portfolio  # still same day, wait
 
             return self._idle.run(portfolio, run_id)
 
