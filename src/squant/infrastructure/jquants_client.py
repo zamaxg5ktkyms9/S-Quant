@@ -221,7 +221,10 @@ class JQuantsClient:
             # Liquidity: avg of last 5 days Va (trading value in yen, v2 field name)
             avg_5d_tv = 0.0
             if cached is not None and "Va" in cached.columns:
-                avg_5d_tv = float(cached["Va"].tail(5).mean() or 0)
+                try:
+                    avg_5d_tv = float(pd.to_numeric(cached["Va"], errors="coerce").tail(5).mean() or 0)
+                except (TypeError, ValueError):
+                    pass
 
             # v2 fins/summary balance sheet fields (short-form keys)
             equity_ratio = float(stmt.get("EqAR", 0) or 0)
@@ -233,7 +236,12 @@ class JQuantsClient:
             last_close = 0.0
             if cached is not None and not cached.empty:
                 close_col = "AdjC" if "AdjC" in cached.columns else "C"
-                last_close = float(cached[close_col].iloc[-1])
+                close_vals = cached[close_col].dropna()
+                if not close_vals.empty:
+                    try:
+                        last_close = float(close_vals.iloc[-1])
+                    except (TypeError, ValueError):
+                        pass
 
             pbr = last_close / bvps if bvps > 0 and last_close > 0 else 0.0
             # prefer direct shares × price; fall back to pbr × equity derivation
