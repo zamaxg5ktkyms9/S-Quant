@@ -45,42 +45,54 @@ def apply_fundamental_filters(
     fundamentals: indexed by ticker with columns: market_cap_jpy, pbr, equity_ratio,
                   avg_5d_trading_value_jpy.
     """
+    counts = {
+        "no_fundamentals": 0,
+        "market_cap": 0,
+        "liquidity": 0,
+        "pbr": 0,
+        "equity_ratio": 0,
+        "price": 0,
+        "blackout": 0,
+    }
     results = []
     for ticker in universe:
         if ticker not in fundamentals.index:
+            counts["no_fundamentals"] += 1
             continue
 
         fund = fundamentals.loc[ticker]
 
-        # Market cap filter
         if fund.get("market_cap_jpy", 0) < MARKET_CAP_MIN_JPY:
+            counts["market_cap"] += 1
             continue
 
-        # Liquidity filter
         if fund.get("avg_5d_trading_value_jpy", 0) < LIQUIDITY_MIN_JPY:
+            counts["liquidity"] += 1
             continue
 
-        # PBR filter
         pbr = fund.get("pbr", 0)
         if not (PBR_MIN <= pbr <= PBR_MAX):
+            counts["pbr"] += 1
             continue
 
-        # Equity ratio filter
         if fund.get("equity_ratio", 0) < EQUITY_RATIO_MIN:
+            counts["equity_ratio"] += 1
             continue
 
-        # Price filter (use last close in ohlcv)
         if ticker not in ohlcv.columns:
+            counts["price"] += 1
             continue
         close_series = ohlcv[ticker].dropna()
         if close_series.empty:
+            counts["price"] += 1
             continue
         last_close = Decimal(str(close_series.iloc[-1]))
         if not (PRICE_MIN <= last_close <= PRICE_MAX):
+            counts["price"] += 1
             continue
 
-        # Earnings / record-date blackout
         if _is_in_blackout(ticker, as_of, blackouts):
+            counts["blackout"] += 1
             continue
 
         results.append(
@@ -94,7 +106,9 @@ def apply_fundamental_filters(
             }
         )
 
-    return pd.DataFrame(results)
+    df = pd.DataFrame(results)
+    df.attrs["filter_counts"] = counts
+    return df
 
 
 def exclude_recent_sales(candidates_df: pd.DataFrame, forbidden_tickers: set[str]) -> pd.DataFrame:

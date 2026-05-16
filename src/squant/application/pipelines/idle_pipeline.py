@@ -92,6 +92,18 @@ class IdlePipeline:
         filtered_df = screener.apply_fundamental_filters(
             valid_tickers, adj_close, fundamentals, today, self._blackouts
         )
+        fc = filtered_df.attrs.get("filter_counts", {})
+        logger.info(
+            f"Screener filter counts (dropped): "
+            f"no_fund={fc.get('no_fundamentals',0)} "
+            f"market_cap={fc.get('market_cap',0)} "
+            f"liquidity={fc.get('liquidity',0)} "
+            f"pbr={fc.get('pbr',0)} "
+            f"equity_ratio={fc.get('equity_ratio',0)} "
+            f"price={fc.get('price',0)} "
+            f"blackout={fc.get('blackout',0)} "
+            f"passed={len(filtered_df)}"
+        )
         if filtered_df.empty:
             logger.info("No candidates after fundamental screening")
             text, blocks = format_no_signal()

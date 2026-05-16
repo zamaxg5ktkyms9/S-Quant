@@ -27,24 +27,29 @@ def detect_signals(
     ohlcv: DataFrame with ticker as column, date as index, values are adjusted close.
     """
     candidates: list[Candidate] = []
+    dropped = {"no_data": 0, "cond1_trend": 0, "cond2_rsi": 0, "cond3_volatility": 0, "cond4_ma_vol": 0}
 
     for ticker in filtered_tickers:
         if ticker not in ohlcv.columns:
+            dropped["no_data"] += 1
             continue
 
         close = ohlcv[ticker].dropna()
         if len(close) < MA_LONG + 10:
+            dropped["no_data"] += 1
             continue
 
         # Condition 1: close > 75-day MA (long-term uptrend)
         ma_long = sma(close, MA_LONG)
         if pd.isna(ma_long.iloc[-1]) or close.iloc[-1] <= ma_long.iloc[-1]:
+            dropped["cond1_trend"] += 1
             continue
 
         # Condition 2: RSI(14) < 45 (pullback)
         rsi_series = rsi(close, RSI_PERIOD)
         last_rsi = rsi_series.iloc[-1]
         if pd.isna(last_rsi) or last_rsi >= RSI_BUY_THRESHOLD:
+            dropped["cond2_rsi"] += 1
             continue
 
         # Condition 3: 20-day std below historical mean (volatility contraction)
@@ -52,26 +57,27 @@ def detect_signals(
         last_std = std_series.iloc[-1]
         hist_mean_std = std_series.iloc[:-1].mean()
         if pd.isna(last_std) or pd.isna(hist_mean_std) or last_std > hist_mean_std:
+            dropped["cond3_volatility"] += 1
             continue
 
         # Condition 4: close > 5-day MA AND today volume > yesterday volume
         ma_short = sma(close, MA_SHORT)
         if pd.isna(ma_short.iloc[-1]) or close.iloc[-1] <= ma_short.iloc[-1]:
+            dropped["cond4_ma_vol"] += 1
             continue
 
-        if ticker not in ohlcv.columns:
-            continue
-        # Volume check requires raw volume data keyed by ticker
         vol_col = f"{ticker}_vol"
         if vol_col in ohlcv.columns:
             vol = ohlcv[vol_col]
         elif hasattr(ohlcv, "volume") and ticker in ohlcv.volume.columns:
             vol = ohlcv.volume[ticker]
         else:
+            dropped["cond4_ma_vol"] += 1
             continue
 
         vol_clean = vol.dropna()
         if len(vol_clean) < 2 or vol_clean.iloc[-1] <= vol_clean.iloc[-2]:
+            dropped["cond4_ma_vol"] += 1
             continue
 
         # Compute volume surge ratio for ranking
@@ -93,4 +99,14 @@ def detect_signals(
             )
         )
 
+    import logging as _logging
+    _logging.getLogger(__name__).info(
+        f"Signal filter counts (dropped): "
+        f"no_data={dropped['no_data']} "
+        f"cond1_trend={dropped['cond1_trend']} "
+        f"cond2_rsi={dropped['cond2_rsi']} "
+        f"cond3_volatility={dropped['cond3_volatility']} "
+        f"cond4_ma_vol={dropped['cond4_ma_vol']} "
+        f"passed={len(candidates)}"
+    )
     return candidates
