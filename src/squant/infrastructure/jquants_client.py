@@ -231,6 +231,10 @@ class JQuantsClient:
             bvps = float(stmt.get("BPS", 0) or 0)
             equity = float(stmt.get("Eq", 0) or 0)
             shares = float(stmt.get("ShOutFY", 0) or 0)
+            # BPS is sometimes '' for companies that don't report it directly;
+            # derive from balance sheet when missing.
+            if bvps == 0.0 and equity > 0 and shares > 0:
+                bvps = equity / shares
 
             # Last adjusted close from OHLCV cache
             last_close = 0.0
