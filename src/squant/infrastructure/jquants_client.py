@@ -8,6 +8,7 @@ Default RPM=50 keeps 17% below the Light-plan 60/min limit, preventing
 the 429 → 5-minute block cascade.
 """
 
+import contextlib
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -83,7 +84,7 @@ class JQuantsClient:
     def _fetch_daily_quotes(self, ticker: str, start: date, end: date) -> pd.DataFrame | None:
         code = self._to_code(ticker)
 
-        for attempt in range(2):  # one retry after a 429 backoff
+        for _attempt in range(2):  # one retry after a 429 backoff
             rows: list[dict] = []
             pagination_key: str | None = None
             ok = True
@@ -243,10 +244,8 @@ class JQuantsClient:
             # Liquidity: avg of last 5 days Va (trading value in yen, v2 field name)
             avg_5d_tv = 0.0
             if cached is not None and "Va" in cached.columns:
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     avg_5d_tv = float(pd.to_numeric(cached["Va"], errors="coerce").tail(5).mean() or 0)
-                except (TypeError, ValueError):
-                    pass
 
             # v2 fins/summary balance sheet fields (short-form keys)
             equity_ratio = float(stmt.get("EqAR", 0) or 0)
@@ -264,10 +263,8 @@ class JQuantsClient:
                 close_col = "AdjC" if "AdjC" in cached.columns else "C"
                 close_vals = cached[close_col].dropna()
                 if not close_vals.empty:
-                    try:
+                    with contextlib.suppress(TypeError, ValueError):
                         last_close = float(close_vals.iloc[-1])
-                    except (TypeError, ValueError):
-                        pass
 
             pbr = last_close / bvps if bvps > 0 and last_close > 0 else 0.0
             # prefer direct shares × price; fall back to pbr × equity derivation
