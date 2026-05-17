@@ -1,5 +1,6 @@
 """Daily runner — state machine dispatcher and top-level error boundary."""
 
+import dataclasses
 import traceback
 import uuid
 from dataclasses import dataclass
@@ -116,8 +117,12 @@ class DailyRunner:
             logger.info(f"State: {portfolio.state.value} | run_id={run_id}")
             new_portfolio = self._dispatch(portfolio, run_id)
 
-            # Persist final state
+            # Persist final state — always save so the portfolio sheet stays current
+            # (idle no-op runs would otherwise leave the sheet permanently empty)
             if not self._settings.dry_run:
+                self._repo.save_portfolio(
+                    dataclasses.replace(new_portfolio, last_run_id=run_id)
+                )
                 self._repo.mark_run_complete(
                     RunRecord(run_id=run_id, run_date=today, status="success")
                 )
