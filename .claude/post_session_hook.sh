@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="/Users/tozawanobuharu/Desktop/GoogleDrive/04 dev/claude/S-Quant"
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
 # Nothing changed → skip silently
