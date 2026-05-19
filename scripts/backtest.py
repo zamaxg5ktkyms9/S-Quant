@@ -161,12 +161,15 @@ def _process_entry(
     bps_map: dict[str, float],
     universe: list[str],
     settings: Settings,
+    verbose: bool = False,
 ) -> None:
     """シグナルを探してポジションを建てる。"""
     adj_slice = adj_close_full.loc[:str(today)]
     vol_slice  = volume_full.loc[:str(today)]
 
     if len(adj_slice) < 30:
+        if verbose:
+            print(f"  [{today}] SKIP: 履歴不足 ({len(adj_slice)}行)")
         return  # 履歴不足
 
     fund = _update_pbr(fund_base, bps_map, adj_slice)
@@ -174,6 +177,9 @@ def _process_entry(
     filtered = screener.apply_fundamental_filters(
         universe, adj_slice, fund, today, set()
     )
+    if verbose:
+        counts = filtered.attrs.get("filter_counts", {})
+        print(f"  [{today}] screener: {len(filtered)}件通過  除外={counts}")
     if filtered.empty:
         return
 
@@ -184,6 +190,8 @@ def _process_entry(
     candidates = signal_engine.detect_signals(
         filtered["ticker"].tolist(), ohlcv_sig, fund, today
     )
+    if verbose:
+        print(f"  [{today}] シグナル候補: {len(candidates)}件")
     if not candidates:
         return
 
@@ -277,7 +285,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="S-Quant バックテスト")
     parser.add_argument("--start", default="2024-01-04", help="開始日 YYYY-MM-DD")
     parser.add_argument("--end",   default="2024-12-31", help="終了日 YYYY-MM-DD")
-    parser.add_argument("--rpm",   type=int, default=30,  help="J-Quants RPM (default: 30)")
+    parser.add_argument("--rpm",     type=int, default=30,   help="J-Quants RPM (default: 30)")
+    parser.add_argument("--verbose", action="store_true",   help="毎日のフィルタ結果を表示")
     args = parser.parse_args()
 
     start = date.fromisoformat(args.start)
@@ -321,6 +330,7 @@ def main() -> None:
                 adj_close_full, volume_full,
                 fund_base, bps_map,
                 universe, settings,
+                verbose=args.verbose,
             )
 
     _print_report(state, start, end, adj_close_full)
