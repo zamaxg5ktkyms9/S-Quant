@@ -2,11 +2,11 @@ from decimal import Decimal
 
 # --- Universe filters ---
 PRICE_MIN = Decimal("100")
-PRICE_MAX = Decimal("900")
-MARKET_CAP_MIN_JPY = 10_000_000_000        # ¥10 billion
+PRICE_MAX = Decimal("3000")
+MARKET_CAP_MIN_JPY = 3_000_000_000         # ¥3 billion
 LIQUIDITY_MIN_JPY = 100_000_000            # ¥100 million (5-day avg trading value)
 PBR_MIN = 0.5
-PBR_MAX = 1.2
+PBR_MAX = 2.0
 EQUITY_RATIO_MIN = 0.30                    # 30%
 EARNINGS_BLACKOUT_DAYS = 3                 # ±3 business days around earnings
 
