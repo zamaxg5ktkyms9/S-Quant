@@ -117,21 +117,21 @@ class TestComputeStopLossPrice:
 
 class TestComputeTakeProfitPrice:
     def test_spread_adjusted_target(self):
-        # entry=500, spread=0.5%, net=7%
-        # TP = 500 * 1.005 * 1.07 / 0.995 ≈ 540.38
+        # entry=500, spread=0.5%, net=4%
+        # TP = 500 * 1.005 * 1.04 / 0.995 ≈ 525.23
         tp = compute_take_profit_price(Decimal("500"))
-        assert float(tp) == pytest.approx(500 * 1.005 * 1.07 / 0.995, rel=1e-6)
+        assert float(tp) == pytest.approx(500 * 1.005 * 1.04 / 0.995, rel=1e-6)
 
-    def test_tp_is_higher_than_gross_7pct(self):
-        """TP must be above entry*(1+0.07) because spread costs add up."""
+    def test_tp_is_higher_than_gross_4pct(self):
+        """TP must be above entry*(1+0.04) because spread costs add up."""
         entry = Decimal("500")
         tp = compute_take_profit_price(entry)
-        gross_7 = entry * Decimal("1.07")
-        assert tp > gross_7
+        gross_4 = entry * Decimal("1.04")
+        assert tp > gross_4
 
     def test_tp_with_900_yen_stock(self):
         tp = compute_take_profit_price(Decimal("900"))
-        assert float(tp) == pytest.approx(900 * 1.005 * 1.07 / 0.995, rel=1e-6)
+        assert float(tp) == pytest.approx(900 * 1.005 * 1.04 / 0.995, rel=1e-6)
 
 
 class TestComputeNetPnl:

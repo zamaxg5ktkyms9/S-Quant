@@ -13,7 +13,7 @@ EARNINGS_BLACKOUT_DAYS = 3                 # ±3 business days around earnings
 # --- Signal parameters ---
 MA_LONG = 75                               # long-term trend MA
 MA_SHORT = 5                               # short-term MA for reversal
-RSI_PERIOD = 14
+RSI_PERIOD = 5
 RSI_BUY_THRESHOLD = 45.0
 VOLATILITY_WINDOW = 20                     # 20-day std dev window
 HISTORY_DAYS_REQUIRED = 90                 # need 90 calendar days (~75 trading days) of data
@@ -26,7 +26,7 @@ SLIPPAGE_BUFFER = Decimal("0.02")          # 2% — same as gap-up threshold
 STOP_LOSS_RATE = Decimal("0.025")          # -2.5% from entry
 ATR_TRAILING_MULTIPLIER = Decimal("1.5")   # 1.5× ATR trailing stop
 TIME_STOP_TRADING_DAYS = 5                 # force exit after 5 trading days
-TARGET_PROFIT_RATE = Decimal("0.07")       # +7.0% take-profit (informational)
+TARGET_PROFIT_RATE = Decimal("0.04")       # +4.0% take-profit (net after S-share spread)
 
 # --- Risk management ---
 CIRCUIT_BREAKER_LOSS_JPY = Decimal("30000")

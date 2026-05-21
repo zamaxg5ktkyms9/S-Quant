@@ -75,13 +75,13 @@ class TestStopLoss:
 
 class TestTakeProfit:
     def test_take_profit_price_formula(self):
-        """TP = entry*(1+s)*(1+r)/(1-s) — 0.5% spread, 7% net target."""
+        """TP = entry*(1+s)*(1+r)/(1-s) — 0.5% spread, 4% net target."""
         entry = Decimal("500")
         tp = compute_take_profit_price(entry)
-        # 500 * 1.005 * 1.07 / 0.995 = 540.37...
-        assert float(tp) == pytest.approx(500.0 * 1.005 * 1.07 / 0.995, rel=1e-6)
-        assert float(tp) > 540.0
-        assert float(tp) < 541.0
+        # 500 * 1.005 * 1.04 / 0.995 = 525.22...
+        assert float(tp) == pytest.approx(500.0 * 1.005 * 1.04 / 0.995, rel=1e-6)
+        assert float(tp) > 525.0
+        assert float(tp) < 526.0
 
     def test_exit_at_take_profit(self):
         """Price at or above TP triggers TAKE_PROFIT exit."""
@@ -93,22 +93,22 @@ class TestTakeProfit:
         decision = evaluate_exit(pos, date(2026, 5, 11), exit_price, high, low, close)
         assert decision.should_exit
         assert decision.reason == ExitReason.TAKE_PROFIT
-        assert "net +7%" in decision.note
+        assert "net +4%" in decision.note
 
     def test_no_exit_below_take_profit(self):
-        """Price 6% above entry (below TP ≈ 8.1% gross) should not trigger TP."""
+        """Price 2% above entry (below TP ≈ 5.0% gross) should not trigger TP."""
         pos = make_position(entry_price=500.0)
-        price = Decimal("530")  # +6% — below TP
+        price = Decimal("510")  # +2% — below TP (¥525.2)
         high, low, close = make_ohlcv(base=float(price))
         decision = evaluate_exit(pos, date(2026, 5, 11), price, high, low, close)
         if decision.should_exit:
             assert decision.reason != ExitReason.TAKE_PROFIT
 
     def test_take_profit_requires_spread_adjusted_gross(self):
-        """Gross 7% gain is NOT enough because spread eats into net return."""
+        """Gross 4% gain is NOT enough because spread eats into net return."""
         pos = make_position(entry_price=500.0)
-        # gross +7% = 535; but TP (net +7%) ≈ 540.38 → should NOT trigger TP at 535
-        price = Decimal("535")
+        # gross +4% = 520; but TP (net +4%) ≈ 525.23 → should NOT trigger TP at 520
+        price = Decimal("520")
         high, low, close = make_ohlcv(base=float(price))
         decision = evaluate_exit(pos, date(2026, 5, 11), price, high, low, close)
         if decision.should_exit:
