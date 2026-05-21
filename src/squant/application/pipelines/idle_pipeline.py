@@ -53,7 +53,16 @@ class IdlePipeline:
 
         # Fetch market data — 160 calendar days ≈ 115 trading days (>= HISTORY_DAYS_REQUIRED=90)
         start = today - timedelta(days=160)
-        adj_close, volume = self._data.fetch_ohlcv(self._universe, start, today)
+        total_tickers = len(self._universe)
+
+        def _ohlcv_progress(done: int, total: int) -> None:
+            pct = done / total * 100
+            if done in {total // 3, total * 2 // 3, total}:
+                self._notifier.send(f"[S-Quant] データ取得中: OHLCV {done}/{total}銘柄 ({pct:.0f}%)")
+
+        adj_close, volume = self._data.fetch_ohlcv(
+            self._universe, start, today, on_progress=_ohlcv_progress
+        )
 
         # System-level freshness check
         self._validator.assert_universe_fresh(adj_close, today)
@@ -85,8 +94,16 @@ class IdlePipeline:
             self._notifier.send(text, blocks)
             return portfolio
 
+        self._notifier.send(
+            f"[S-Quant] OHLCV取得完了 — 有効銘柄 {len(valid_tickers)}/{total_tickers}件、ファンダメンタルズ取得開始"
+        )
+
+        def _fund_progress(done: int, total: int) -> None:
+            if done == total:
+                self._notifier.send(f"[S-Quant] ファンダメンタルズ取得完了 — {total}銘柄、スクリーニング開始")
+
         # Fetch fundamentals for valid tickers
-        fundamentals = self._data.fetch_fundamentals(valid_tickers)
+        fundamentals = self._data.fetch_fundamentals(valid_tickers, on_progress=_fund_progress)
 
         # Screener: fundamental + price + blackout filters
         filtered_df = screener.apply_fundamental_filters(
@@ -109,6 +126,10 @@ class IdlePipeline:
             text, blocks = format_no_signal()
             self._notifier.send(text, blocks)
             return portfolio
+
+        self._notifier.send(
+            f"[S-Quant] スクリーニング通過: {len(filtered_df)}銘柄 — シグナル検出中"
+        )
 
         filtered_df = screener.exclude_recent_sales(filtered_df, forbidden)
         if filtered_df.empty:

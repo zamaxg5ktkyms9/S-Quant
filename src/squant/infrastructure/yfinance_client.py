@@ -5,6 +5,7 @@ Uses auto_adjust=False to get both raw Close and Adj Close:
 - Close      → entry price reference (actual yen amount)
 """
 
+from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -50,7 +51,11 @@ class YFinanceClient:
         return df
 
     def fetch_ohlcv(
-        self, tickers: list[str], start: date, end: date
+        self,
+        tickers: list[str],
+        start: date,
+        end: date,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Return (adj_close_df, volume_df) with tickers as columns."""
         raw = self._download(tickers, start, end)
@@ -77,7 +82,11 @@ class YFinanceClient:
         raw = self._download(tickers, start, end)
         return raw
 
-    def fetch_fundamentals(self, tickers: list[str]) -> pd.DataFrame:
+    def fetch_fundamentals(
+        self,
+        tickers: list[str],
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> pd.DataFrame:
         """Fetch market cap, PBR, equity ratio for each ticker.
 
         Uses yfinance fast_info + info. Falls back gracefully on missing fields.

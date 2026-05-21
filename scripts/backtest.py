@@ -300,13 +300,21 @@ def main() -> None:
     # シグナル検出に必要な履歴 + バックテスト期間を一括取得
     fetch_start = start - timedelta(days=180)
 
+    def _progress(label: str) -> object:
+        def _cb(done: int, total: int) -> None:
+            if done % 50 == 0 or done == total:
+                print(f"  {label}: {done}/{total} ({done/total*100:.0f}%)", flush=True)
+        return _cb
+
     print(f"Fetching OHLCV ({fetch_start} → {end})...", flush=True)
-    adj_close_full, volume_full = client.fetch_ohlcv(universe, fetch_start, end)
+    adj_close_full, volume_full = client.fetch_ohlcv(
+        universe, fetch_start, end, on_progress=_progress("OHLCV")
+    )
     full_cache = dict(client._ohlcv_cache)
     print(f"  → {len(adj_close_full.columns)} tickers", flush=True)
 
     print("Fetching fundamentals...", flush=True)
-    fund_base = client.fetch_fundamentals(universe)
+    fund_base = client.fetch_fundamentals(universe, on_progress=_progress("fundamentals"))
     print(f"  → {len(fund_base)} rows", flush=True)
 
     bps_map = _build_bps_map(fund_base, adj_close_full)
@@ -320,8 +328,10 @@ def main() -> None:
     print(f"\nバックテスト期間: {start} 〜 {end}  ({len(trading_days)} 営業日)\n", flush=True)
 
     state = BacktestState()
+    total_days = len(trading_days)
+    report_interval = max(1, total_days // 4)  # 25%刻みで報告
 
-    for today in trading_days:
+    for i, today in enumerate(trading_days):
         if state.position is not None:
             _process_exit(state, today, full_cache)
         else:
@@ -331,6 +341,13 @@ def main() -> None:
                 fund_base, bps_map,
                 universe, settings,
                 verbose=args.verbose,
+            )
+        if (i + 1) % report_interval == 0 or (i + 1) == total_days:
+            pct = (i + 1) / total_days * 100
+            print(
+                f"  [{today}] 進捗 {i+1}/{total_days}日 ({pct:.0f}%)  "
+                f"取引{len(state.trades)}件  シグナル{state.signals_found}日",
+                flush=True,
             )
 
     _print_report(state, start, end, adj_close_full)

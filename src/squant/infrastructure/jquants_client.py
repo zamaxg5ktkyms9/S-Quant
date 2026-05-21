@@ -11,6 +11,7 @@ the 429 → 5-minute block cascade.
 import contextlib
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 
@@ -134,13 +135,22 @@ class JQuantsClient:
         return df.set_index("Date").sort_index()
 
     def fetch_ohlcv(
-        self, tickers: list[str], start: date, end: date
+        self,
+        tickers: list[str],
+        start: date,
+        end: date,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Return (adj_close_df, volume_df) — tickers as columns, dates as index."""
+        """Return (adj_close_df, volume_df) — tickers as columns, dates as index.
+
+        on_progress(done, total) is called after each ticker completes.
+        """
         self._ohlcv_cache.clear()
 
         adj_close_map: dict[str, pd.Series] = {}
         volume_map: dict[str, pd.Series] = {}
+        total = len(tickers)
+        done = 0
 
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
             futures = {
@@ -150,6 +160,9 @@ class JQuantsClient:
             for future in as_completed(futures):
                 ticker = futures[future]
                 df = future.result()
+                done += 1
+                if on_progress:
+                    on_progress(done, total)
                 if df is None or df.empty:
                     continue
                 self._ohlcv_cache[ticker] = df
@@ -226,15 +239,27 @@ class JQuantsClient:
 
         return {}
 
-    def fetch_fundamentals(self, tickers: list[str]) -> pd.DataFrame:
-        """Derive market_cap, PBR, equity_ratio, avg_5d_trading_value from J-Quants v2."""
+    def fetch_fundamentals(
+        self,
+        tickers: list[str],
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> pd.DataFrame:
+        """Derive market_cap, PBR, equity_ratio, avg_5d_trading_value from J-Quants v2.
+
+        on_progress(done, total) is called after each ticker completes.
+        """
+        total = len(tickers)
+        done = 0
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
             futures = {
                 executor.submit(self._fetch_latest_fins_summary, t): t for t in tickers
             }
-            stmt_map: dict[str, dict] = {
-                futures[f]: f.result() for f in as_completed(futures)
-            }
+            stmt_map: dict[str, dict] = {}
+            for f in as_completed(futures):
+                stmt_map[futures[f]] = f.result()
+                done += 1
+                if on_progress:
+                    on_progress(done, total)
 
         records = []
         for ticker in tickers:

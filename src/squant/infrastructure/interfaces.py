@@ -1,5 +1,6 @@
 """Protocol definitions — all external I/O hides behind these interfaces."""
 
+from collections.abc import Callable
 from datetime import date, datetime
 from typing import Protocol
 
@@ -21,11 +22,16 @@ class IMarketDataClient(Protocol):
         tickers: list[str],
         start: date,
         end: date,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Return (adj_close_df, volume_df) with ticker as columns, date as index."""
         ...
 
-    def fetch_fundamentals(self, tickers: list[str]) -> pd.DataFrame:
+    def fetch_fundamentals(
+        self,
+        tickers: list[str],
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> pd.DataFrame:
         """Return DataFrame indexed by ticker with columns:
         market_cap_jpy, pbr, equity_ratio, avg_5d_trading_value_jpy.
         """
