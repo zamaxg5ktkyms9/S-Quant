@@ -323,10 +323,16 @@ def main() -> None:
         fund_base      = cached["fundamentals"]
         print(f"  → OHLCV {len(adj_close_full.columns)} tickers, fundamentals {len(fund_base)} rows", flush=True)
     else:
-        _fetch_timeout = 600.0  # 10分以内に完了しなければ中断
+        # タイムアウト = 銘柄数 × 2コール / RPM × 60秒 × 安全マージン2倍
+        # (OHLCV 1回 + fundamentals 1回 = 2コール/銘柄, ページネーション不要と実測確認)
+        # 例: 282銘柄, RPM=30 → 282×2/30×60×2 = 2,256秒 ≈ 38分
+        _api_calls = len(universe) * 2
+        _fetch_timeout = _api_calls / args.rpm * 60 * 2
+        _fetch_timeout_min = int(_fetch_timeout / 60)
 
         try:
             print(f"Fetching OHLCV ({fetch_start} → {end})...", flush=True)
+            print(f"  (タイムアウト上限: {_fetch_timeout_min}分)", flush=True)
             adj_close_full, volume_full = client.fetch_ohlcv(
                 universe, fetch_start, end,
                 on_progress=_progress("OHLCV"),
@@ -344,7 +350,7 @@ def main() -> None:
             print(f"  → {len(fund_base)} rows", flush=True)
 
         except FetchTimeoutError as e:
-            print(f"\n❌ データ取得が{int(_fetch_timeout/60)}分以内に完了しませんでした。", flush=True)
+            print(f"\n❌ データ取得が{_fetch_timeout_min}分以内に完了しませんでした。", flush=True)
             print("   原因: J-Quants APIのレートリミット (429) が連鎖しています。", flush=True)
             print("   対処: 時間をおいて再実行するか、--rpm を下げてください。", flush=True)
             print(f"   詳細: {e}", flush=True)
