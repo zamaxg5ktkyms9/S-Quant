@@ -23,6 +23,7 @@ class IMarketDataClient(Protocol):
         start: date,
         end: date,
         on_progress: Callable[[int, int], None] | None = None,
+        timeout_seconds: float | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Return (adj_close_df, volume_df) with ticker as columns, date as index."""
         ...
@@ -31,6 +32,7 @@ class IMarketDataClient(Protocol):
         self,
         tickers: list[str],
         on_progress: Callable[[int, int], None] | None = None,
+        timeout_seconds: float | None = None,
     ) -> pd.DataFrame:
         """Return DataFrame indexed by ticker with columns:
         market_cap_jpy, pbr, equity_ratio, avg_5d_trading_value_jpy.

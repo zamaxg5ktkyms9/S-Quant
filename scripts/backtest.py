@@ -36,7 +36,7 @@ from squant.domain import ranking, screener, signal_engine
 from squant.domain.models import Position
 from squant.domain.position_manager import evaluate_exit
 from squant.domain.quantity_calculator import compute_quantity, compute_stop_loss_price
-from squant.infrastructure.jquants_client import JQuantsClient
+from squant.infrastructure.jquants_client import FetchTimeoutError, JQuantsClient
 from squant.utils.jst import add_trading_days, is_tse_trading_day
 
 
@@ -323,16 +323,32 @@ def main() -> None:
         fund_base      = cached["fundamentals"]
         print(f"  → OHLCV {len(adj_close_full.columns)} tickers, fundamentals {len(fund_base)} rows", flush=True)
     else:
-        print(f"Fetching OHLCV ({fetch_start} → {end})...", flush=True)
-        adj_close_full, volume_full = client.fetch_ohlcv(
-            universe, fetch_start, end, on_progress=_progress("OHLCV")
-        )
-        full_cache = dict(client._ohlcv_cache)
-        print(f"  → {len(adj_close_full.columns)} tickers", flush=True)
+        _fetch_timeout = 600.0  # 10分以内に完了しなければ中断
 
-        print("Fetching fundamentals...", flush=True)
-        fund_base = client.fetch_fundamentals(universe, on_progress=_progress("fundamentals"))
-        print(f"  → {len(fund_base)} rows", flush=True)
+        try:
+            print(f"Fetching OHLCV ({fetch_start} → {end})...", flush=True)
+            adj_close_full, volume_full = client.fetch_ohlcv(
+                universe, fetch_start, end,
+                on_progress=_progress("OHLCV"),
+                timeout_seconds=_fetch_timeout,
+            )
+            full_cache = dict(client._ohlcv_cache)
+            print(f"  → {len(adj_close_full.columns)} tickers", flush=True)
+
+            print("Fetching fundamentals...", flush=True)
+            fund_base = client.fetch_fundamentals(
+                universe,
+                on_progress=_progress("fundamentals"),
+                timeout_seconds=_fetch_timeout,
+            )
+            print(f"  → {len(fund_base)} rows", flush=True)
+
+        except FetchTimeoutError as e:
+            print(f"\n❌ データ取得が{int(_fetch_timeout/60)}分以内に完了しませんでした。", flush=True)
+            print("   原因: J-Quants APIのレートリミット (429) が連鎖しています。", flush=True)
+            print("   対処: 時間をおいて再実行するか、--rpm を下げてください。", flush=True)
+            print(f"   詳細: {e}", flush=True)
+            sys.exit(1)
 
         cache_dir.mkdir(parents=True, exist_ok=True)
         with cache_file.open("wb") as f:

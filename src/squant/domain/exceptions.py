@@ -28,3 +28,7 @@ class SheetsError(SQuantError):
 
 class SlackError(SQuantError):
     """Raised on Slack notification failures."""
+
+
+class FetchTimeoutError(SQuantError):
+    """Raised when a market-data fetch exceeds the allowed timeout."""

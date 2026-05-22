@@ -25,23 +25,41 @@ logger = get_logger(__name__)
 _BASE_URL = "https://api.jquants.com/v2"
 _MAX_WORKERS = 8
 _429_BACKOFF_SECONDS = 65.0  # slightly over 1 minute to clear the clock-minute window
+_429_MAX_CONSECUTIVE = 3     # give up a ticker after this many consecutive 429s
+
+
+class FetchTimeoutError(Exception):
+    """Raised when fetch_ohlcv / fetch_fundamentals exceeds timeout_seconds."""
 
 
 class _RateLimiter:
     """Thread-safe per-request rate limiter with global 429 backoff."""
 
-    def __init__(self, rpm: int) -> None:
+    def __init__(self, rpm: int, deadline: float | None = None) -> None:
         self._interval = 60.0 / max(rpm, 1)
         self._lock = threading.Lock()
         self._last: float = 0.0
         self._backoff_until: float = 0.0
+        self._deadline: float | None = deadline  # monotonic time; None = no limit
 
     def wait(self) -> None:
         with self._lock:
             now = time.monotonic()
+
+            # タイムアウト超過チェック
+            if self._deadline is not None and now >= self._deadline:
+                raise FetchTimeoutError(
+                    "J-Quants fetch timed out after deadline was reached"
+                )
+
             # Honour global backoff (triggered by any 429 response)
             if now < self._backoff_until:
                 wait_for = self._backoff_until - now
+                # タイムアウトを超えるバックオフには待たずに即エラー
+                if self._deadline is not None and time.monotonic() + wait_for > self._deadline:
+                    raise FetchTimeoutError(
+                        f"J-Quants fetch timed out: backoff of {wait_for:.0f}s would exceed deadline"
+                    )
                 logger.info(f"J-Quants rate backoff: waiting {wait_for:.0f}s")
                 time.sleep(wait_for)
 
@@ -63,10 +81,14 @@ class _RateLimiter:
 class JQuantsClient:
     def __init__(self, api_key: str, requests_per_minute: int = 50) -> None:
         self._api_key = api_key
-        self._limiter = _RateLimiter(requests_per_minute)
+        self._rpm = requests_per_minute
         # Cache full daily DataFrame per ticker within one run;
         # used by fetch_fundamentals to derive Va (trading value) stats.
         self._ohlcv_cache: dict[str, pd.DataFrame] = {}
+
+    def _make_limiter(self, timeout_seconds: float | None) -> _RateLimiter:
+        deadline = (time.monotonic() + timeout_seconds) if timeout_seconds else None
+        return _RateLimiter(self._rpm, deadline=deadline)
 
     # ── Headers ────────────────────────────────────────────────────────────────
 
@@ -82,10 +104,12 @@ class JQuantsClient:
 
     # ── Price data ─────────────────────────────────────────────────────────────
 
-    def _fetch_daily_quotes(self, ticker: str, start: date, end: date) -> pd.DataFrame | None:
+    def _fetch_daily_quotes(
+        self, ticker: str, start: date, end: date, limiter: _RateLimiter
+    ) -> pd.DataFrame | None:
         code = self._to_code(ticker)
 
-        for _attempt in range(2):  # one retry after a 429 backoff
+        for attempt in range(_429_MAX_CONSECUTIVE):
             rows: list[dict] = []
             pagination_key: str | None = None
             ok = True
@@ -95,7 +119,7 @@ class JQuantsClient:
                 if pagination_key:
                     params["pagination_key"] = pagination_key
 
-                self._limiter.wait()
+                limiter.wait()  # FetchTimeoutError が raise されることがある
                 try:
                     resp = httpx.get(
                         f"{_BASE_URL}/equities/bars/daily",
@@ -103,12 +127,14 @@ class JQuantsClient:
                         headers=self._headers(),
                         timeout=30,
                     )
+                except FetchTimeoutError:
+                    raise
                 except Exception as e:
                     logger.debug(f"J-Quants network error for {ticker}: {e}")
                     return None
 
                 if resp.status_code == 429:
-                    self._limiter.set_backoff()
+                    limiter.set_backoff()
                     ok = False
                     break  # break pagination loop → retry outer loop
                 if resp.status_code in (401, 403):
@@ -126,6 +152,9 @@ class JQuantsClient:
 
             if ok:
                 break  # success — no need to retry
+            if attempt == _429_MAX_CONSECUTIVE - 1:
+                logger.warning(f"{ticker}: {_429_MAX_CONSECUTIVE} consecutive 429s — skipping")
+                return None
 
         if not rows:
             return None
@@ -140,13 +169,16 @@ class JQuantsClient:
         start: date,
         end: date,
         on_progress: Callable[[int, int], None] | None = None,
+        timeout_seconds: float | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Return (adj_close_df, volume_df) — tickers as columns, dates as index.
 
         on_progress(done, total) is called after each ticker completes.
+        Raises FetchTimeoutError if timeout_seconds is set and exceeded.
         """
         self._ohlcv_cache.clear()
 
+        limiter = self._make_limiter(timeout_seconds)
         adj_close_map: dict[str, pd.Series] = {}
         volume_map: dict[str, pd.Series] = {}
         total = len(tickers)
@@ -154,12 +186,12 @@ class JQuantsClient:
 
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
             futures = {
-                executor.submit(self._fetch_daily_quotes, t, start, end): t
+                executor.submit(self._fetch_daily_quotes, t, start, end, limiter): t
                 for t in tickers
             }
             for future in as_completed(futures):
                 ticker = futures[future]
-                df = future.result()
+                df = future.result()  # FetchTimeoutError が伝播する
                 done += 1
                 if on_progress:
                     on_progress(done, total)
@@ -189,7 +221,8 @@ class JQuantsClient:
         """
         if not tickers:
             return pd.DataFrame()
-        df = self._fetch_daily_quotes(tickers[0], start, end)
+        limiter = self._make_limiter(None)
+        df = self._fetch_daily_quotes(tickers[0], start, end, limiter)
         if df is None or df.empty:
             return pd.DataFrame()
 
@@ -208,26 +241,29 @@ class JQuantsClient:
 
     # ── Fundamentals ───────────────────────────────────────────────────────────
 
-    def _fetch_latest_fins_summary(self, ticker: str) -> dict:
+    def _fetch_latest_fins_summary(self, ticker: str, limiter: _RateLimiter) -> dict:
         """Return most-recently-disclosed fins/summary dict (or {})."""
         code = self._to_code(ticker)
-        for attempt in range(2):  # one retry after a 429 backoff
+        for attempt in range(_429_MAX_CONSECUTIVE):
             try:
-                self._limiter.wait()
+                limiter.wait()  # FetchTimeoutError が raise されることがある
                 resp = httpx.get(
                     f"{_BASE_URL}/fins/summary",
                     params={"code": code},
                     headers=self._headers(),
                     timeout=30,
                 )
+            except FetchTimeoutError:
+                raise
             except Exception as e:
                 logger.debug(f"J-Quants fins/summary error for {ticker}: {e}")
                 return {}
 
             if resp.status_code == 429:
-                self._limiter.set_backoff()
-                if attempt == 0:
+                limiter.set_backoff()
+                if attempt < _429_MAX_CONSECUTIVE - 1:
                     continue
+                logger.warning(f"{ticker}: {_429_MAX_CONSECUTIVE} consecutive 429s — skipping")
                 return {}
             if not resp.is_success:
                 return {}
@@ -243,20 +279,23 @@ class JQuantsClient:
         self,
         tickers: list[str],
         on_progress: Callable[[int, int], None] | None = None,
+        timeout_seconds: float | None = None,
     ) -> pd.DataFrame:
         """Derive market_cap, PBR, equity_ratio, avg_5d_trading_value from J-Quants v2.
 
         on_progress(done, total) is called after each ticker completes.
+        Raises FetchTimeoutError if timeout_seconds is set and exceeded.
         """
+        limiter = self._make_limiter(timeout_seconds)
         total = len(tickers)
         done = 0
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
             futures = {
-                executor.submit(self._fetch_latest_fins_summary, t): t for t in tickers
+                executor.submit(self._fetch_latest_fins_summary, t, limiter): t for t in tickers
             }
             stmt_map: dict[str, dict] = {}
             for f in as_completed(futures):
-                stmt_map[futures[f]] = f.result()
+                stmt_map[futures[f]] = f.result()  # FetchTimeoutError が伝播する
                 done += 1
                 if on_progress:
                     on_progress(done, total)

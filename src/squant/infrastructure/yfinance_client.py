@@ -56,6 +56,7 @@ class YFinanceClient:
         start: date,
         end: date,
         on_progress: Callable[[int, int], None] | None = None,
+        timeout_seconds: float | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Return (adj_close_df, volume_df) with tickers as columns."""
         raw = self._download(tickers, start, end)
@@ -86,6 +87,7 @@ class YFinanceClient:
         self,
         tickers: list[str],
         on_progress: Callable[[int, int], None] | None = None,
+        timeout_seconds: float | None = None,
     ) -> pd.DataFrame:
         """Fetch market cap, PBR, equity ratio for each ticker.
 
