@@ -32,3 +32,4 @@ Thumbs.db
 
 # yfinance cache
 ~/.cache/py-yfinance/
+.backtest_cache/

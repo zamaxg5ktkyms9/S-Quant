@@ -13,10 +13,12 @@ S-Quant バックテスト
 
 import argparse
 import os
+import pickle
 import sys
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 sys.path.insert(0, "src")
 
@@ -285,8 +287,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="S-Quant バックテスト")
     parser.add_argument("--start", default="2024-01-04", help="開始日 YYYY-MM-DD")
     parser.add_argument("--end",   default="2024-12-31", help="終了日 YYYY-MM-DD")
-    parser.add_argument("--rpm",     type=int, default=30,   help="J-Quants RPM (default: 30)")
-    parser.add_argument("--verbose", action="store_true",   help="毎日のフィルタ結果を表示")
+    parser.add_argument("--rpm",       type=int, default=30,   help="J-Quants RPM (default: 30)")
+    parser.add_argument("--verbose",   action="store_true",   help="毎日のフィルタ結果を表示")
+    parser.add_argument("--cache-dir", default=".backtest_cache", help="データキャッシュ保存先")
     args = parser.parse_args()
 
     start = date.fromisoformat(args.start)
@@ -300,22 +303,46 @@ def main() -> None:
     # シグナル検出に必要な履歴 + バックテスト期間を一括取得
     fetch_start = start - timedelta(days=180)
 
+    cache_dir = Path(args.cache_dir)
+    cache_key  = f"{fetch_start}_{end}"
+    cache_file = cache_dir / f"data_{cache_key}.pkl"
+
     def _progress(label: str) -> object:
         def _cb(done: int, total: int) -> None:
             if done % 50 == 0 or done == total:
                 print(f"  {label}: {done}/{total} ({done/total*100:.0f}%)", flush=True)
         return _cb
 
-    print(f"Fetching OHLCV ({fetch_start} → {end})...", flush=True)
-    adj_close_full, volume_full = client.fetch_ohlcv(
-        universe, fetch_start, end, on_progress=_progress("OHLCV")
-    )
-    full_cache = dict(client._ohlcv_cache)
-    print(f"  → {len(adj_close_full.columns)} tickers", flush=True)
+    if cache_file.exists():
+        print(f"キャッシュ読み込み中: {cache_file}", flush=True)
+        with cache_file.open("rb") as f:
+            cached = pickle.load(f)
+        adj_close_full = cached["adj_close"]
+        volume_full    = cached["volume"]
+        full_cache     = cached["full_cache"]
+        fund_base      = cached["fundamentals"]
+        print(f"  → OHLCV {len(adj_close_full.columns)} tickers, fundamentals {len(fund_base)} rows", flush=True)
+    else:
+        print(f"Fetching OHLCV ({fetch_start} → {end})...", flush=True)
+        adj_close_full, volume_full = client.fetch_ohlcv(
+            universe, fetch_start, end, on_progress=_progress("OHLCV")
+        )
+        full_cache = dict(client._ohlcv_cache)
+        print(f"  → {len(adj_close_full.columns)} tickers", flush=True)
 
-    print("Fetching fundamentals...", flush=True)
-    fund_base = client.fetch_fundamentals(universe, on_progress=_progress("fundamentals"))
-    print(f"  → {len(fund_base)} rows", flush=True)
+        print("Fetching fundamentals...", flush=True)
+        fund_base = client.fetch_fundamentals(universe, on_progress=_progress("fundamentals"))
+        print(f"  → {len(fund_base)} rows", flush=True)
+
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        with cache_file.open("wb") as f:
+            pickle.dump({
+                "adj_close": adj_close_full,
+                "volume":    volume_full,
+                "full_cache": full_cache,
+                "fundamentals": fund_base,
+            }, f)
+        print(f"キャッシュ保存: {cache_file}", flush=True)
 
     bps_map = _build_bps_map(fund_base, adj_close_full)
 
