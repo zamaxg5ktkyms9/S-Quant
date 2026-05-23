@@ -14,6 +14,7 @@ S-Quant バックテスト（改訂版・Phase 1 / 単元株 / ザラ場約定�
 """
 
 import argparse
+import json
 import os
 import pickle
 import sys
@@ -435,6 +436,86 @@ def _print_report(
     print(f"\n最終キャッシュ : ¥{int(state.cash):,}  (初期 ¥{int(state.initial_capital):,})")
 
 
+def _apply_param_overrides(args: argparse.Namespace) -> None:
+    """CLI 引数でパラメータを上書きする（grid search 用）。
+
+    constants.py のモジュール属性と、各ドメインモジュールが import 済みの定数を
+    両方書き換える必要がある（from X import Y はローカルバインディングのため）。
+    """
+    import squant.config.constants as C
+    import squant.domain.position_manager as PM
+    import squant.domain.quantity_calculator as QC
+    import squant.domain.signal_engine as SE
+
+    if args.target_profit is not None:
+        rate = Decimal(str(args.target_profit))
+        C.TARGET_PROFIT_RATE = rate
+        QC.TARGET_PROFIT_RATE = rate
+        # compute_take_profit_price の default 引数も差し替え
+        _orig = QC.compute_take_profit_price
+        def _patched_tp(entry_price, target_net_rate=rate, spread_rate=Decimal("0")):
+            return _orig(entry_price, target_net_rate, spread_rate)
+        QC.compute_take_profit_price = _patched_tp
+        PM.compute_take_profit_price = _patched_tp  # position_manager の import バインドも
+
+    if args.atr_mult is not None:
+        m = Decimal(str(args.atr_mult))
+        C.ATR_TRAILING_MULTIPLIER = m
+        PM.ATR_TRAILING_MULTIPLIER = m
+
+    if args.rsi_upper is not None:
+        C.RSI_BUY_UPPER = float(args.rsi_upper)
+        SE.RSI_BUY_UPPER = float(args.rsi_upper)
+
+    if args.rsi_lower is not None:
+        C.RSI_BUY_LOWER = float(args.rsi_lower)
+        SE.RSI_BUY_LOWER = float(args.rsi_lower)
+
+    if args.time_stop is not None:
+        C.TIME_STOP_TRADING_DAYS = int(args.time_stop)
+        PM.TIME_STOP_TRADING_DAYS = int(args.time_stop)
+
+
+def _state_to_metrics(state: BacktestState, start: date, end: date) -> dict:
+    months = max(1.0, (end - start).days / 30.4)
+    pnl_list = [float(t.pnl) for t in state.trades]
+    wins = [p for p in pnl_list if p > 0]
+    losses = [p for p in pnl_list if p < 0]
+    total = sum(pnl_list)
+    by_reason: dict[str, int] = {}
+    for t in state.trades:
+        by_reason[t.reason] = by_reason.get(t.reason, 0) + 1
+
+    pf = (sum(wins) / abs(sum(losses))) if losses else float("inf") if wins else 0.0
+
+    cumulative = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    for p in pnl_list:
+        cumulative += p
+        peak = max(peak, cumulative)
+        max_dd = min(max_dd, cumulative - peak)
+
+    return {
+        "trades": len(state.trades),
+        "signals": state.signals_found,
+        "gap_up_skipped": state.gap_up_skipped,
+        "insufficient_skipped": state.insufficient_capital_skipped,
+        "win_rate": (len(wins) / len(pnl_list)) if pnl_list else 0.0,
+        "total_pnl": total,
+        "monthly_pnl": total / months,
+        "monthly_pnl_pct": total / float(state.initial_capital) * 100 / months,
+        "expectancy": (total / len(pnl_list)) if pnl_list else 0.0,
+        "avg_win": (sum(wins) / len(wins)) if wins else 0.0,
+        "avg_loss": (sum(losses) / len(losses)) if losses else 0.0,
+        "max_dd": max_dd,
+        "max_dd_pct": max_dd / float(state.initial_capital) * 100,
+        "profit_factor": pf,
+        "trades_per_month": len(state.trades) / months,
+        "by_reason": by_reason,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="S-Quant バックテスト（改訂版・単元株・ザラ場モード）")
     parser.add_argument("--start", default="2024-01-04", help="開始日 YYYY-MM-DD")
@@ -443,7 +524,17 @@ def main() -> None:
     parser.add_argument("--rpm", type=int, default=30, help="J-Quants RPM (default: 30)")
     parser.add_argument("--verbose", action="store_true", help="毎日のフィルタ結果を表示")
     parser.add_argument("--cache-dir", default=".backtest_cache", help="データキャッシュ保存先")
+    # Grid search overrides
+    parser.add_argument("--target-profit", type=float, default=None, help="利確目標 (例: 0.06)")
+    parser.add_argument("--atr-mult", type=float, default=None, help="ATRトレーリング乗数 (例: 2.5)")
+    parser.add_argument("--rsi-upper", type=float, default=None, help="RSI上限 (例: 50)")
+    parser.add_argument("--rsi-lower", type=float, default=None, help="RSI下限 (例: 35)")
+    parser.add_argument("--time-stop", type=int, default=None, help="タイムストップ営業日 (例: 5)")
+    parser.add_argument("--json", action="store_true", help="JSONメトリクスを最終行に出力（grid search用）")
+    parser.add_argument("--quiet", action="store_true", help="進捗ログ抑制（grid search用）")
     args = parser.parse_args()
+
+    _apply_param_overrides(args)
 
     start = date.fromisoformat(args.start)
     end   = date.fromisoformat(args.end)
@@ -466,14 +557,16 @@ def main() -> None:
         return _cb
 
     if cache_file.exists():
-        print(f"キャッシュ読み込み中: {cache_file}", flush=True)
+        if not args.quiet:
+            print(f"キャッシュ読み込み中: {cache_file}", flush=True)
         with cache_file.open("rb") as f:
             cached = pickle.load(f)
         adj_close_full = cached["adj_close"]
         volume_full    = cached["volume"]
         full_cache     = cached["full_cache"]
         fund_base      = cached["fundamentals"]
-        print(f"  → OHLCV {len(adj_close_full.columns)} tickers, fundamentals {len(fund_base)} rows", flush=True)
+        if not args.quiet:
+            print(f"  → OHLCV {len(adj_close_full.columns)} tickers, fundamentals {len(fund_base)} rows", flush=True)
     else:
         _api_calls = len(universe) * 2
         _fetch_timeout = _api_calls / args.rpm * 60 * 2
@@ -521,8 +614,9 @@ def main() -> None:
         for d in pd.bdate_range(start, end)
         if is_tse_trading_day(d.date())
     ])
-    print(f"\nバックテスト期間: {start} 〜 {end}  ({len(trading_days)} 営業日)", flush=True)
-    print(f"初期資本: ¥{args.budget:,}  単元: {SHARES_PER_UNIT}株\n", flush=True)
+    if not args.quiet:
+        print(f"\nバックテスト期間: {start} 〜 {end}  ({len(trading_days)} 営業日)", flush=True)
+        print(f"初期資本: ¥{args.budget:,}  単元: {SHARES_PER_UNIT}株\n", flush=True)
 
     state = BacktestState(
         cash=Decimal(str(args.budget)),
@@ -531,34 +625,52 @@ def main() -> None:
     total_days = len(trading_days)
     report_interval = max(1, total_days // 8)
 
-    for i, today in enumerate(trading_days):
-        # 1. 保有中ポジションの出口判定
-        if state.position is not None:
-            _process_exit(state, today, full_cache)
+    # quiet モードでは _process_exit / _process_pending_entry / _process_signal_scan の
+    # print 出力を抑制するため stdout を一時的に差し替える
+    import contextlib
+    import io as _io
 
-        # 2. 前日シグナルを翌営業日始値で約定判定
-        if state.position is None and state.pending_entry is not None:
-            _process_pending_entry(state, today, full_cache, settings)
+    def _run_loop():
+        for i, today in enumerate(trading_days):
+            if state.position is not None:
+                _process_exit(state, today, full_cache)
+            if state.position is None and state.pending_entry is not None:
+                _process_pending_entry(state, today, full_cache, settings)
+            if state.position is None and state.pending_entry is None:
+                _process_signal_scan(
+                    state, today,
+                    adj_close_full, volume_full,
+                    fund_base, bps_map,
+                    universe,
+                    verbose=args.verbose,
+                )
+            if not args.quiet and ((i + 1) % report_interval == 0 or (i + 1) == total_days):
+                pct = (i + 1) / total_days * 100
+                print(
+                    f"  [{today}] 進捗 {i+1}/{total_days}日 ({pct:.0f}%)  "
+                    f"取引{len(state.trades)}件  シグナル{state.signals_found}回",
+                    flush=True,
+                )
 
-        # 3. 引け後にシグナルスキャン（翌営業日のpending_entry作成）
-        if state.position is None and state.pending_entry is None:
-            _process_signal_scan(
-                state, today,
-                adj_close_full, volume_full,
-                fund_base, bps_map,
-                universe,
-                verbose=args.verbose,
-            )
+    if args.quiet:
+        with contextlib.redirect_stdout(_io.StringIO()):
+            _run_loop()
+    else:
+        _run_loop()
 
-        if (i + 1) % report_interval == 0 or (i + 1) == total_days:
-            pct = (i + 1) / total_days * 100
-            print(
-                f"  [{today}] 進捗 {i+1}/{total_days}日 ({pct:.0f}%)  "
-                f"取引{len(state.trades)}件  シグナル{state.signals_found}回",
-                flush=True,
-            )
+    if not args.quiet:
+        _print_report(state, start, end, adj_close_full)
 
-    _print_report(state, start, end, adj_close_full)
+    if args.json:
+        metrics = _state_to_metrics(state, start, end)
+        metrics["params"] = {
+            "target_profit": args.target_profit,
+            "atr_mult": args.atr_mult,
+            "rsi_upper": args.rsi_upper,
+            "rsi_lower": args.rsi_lower,
+            "time_stop": args.time_stop,
+        }
+        print("__METRICS_JSON__" + json.dumps(metrics))
 
 
 if __name__ == "__main__":
