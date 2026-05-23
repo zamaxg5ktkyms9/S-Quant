@@ -1,8 +1,8 @@
 from decimal import Decimal
 
-# --- Universe filters ---
+# --- Universe filters (Phase 1) ---
 PRICE_MIN = Decimal("100")
-PRICE_MAX = Decimal("3000")
+PRICE_MAX = Decimal("1000")                # Phase 1: 単元株100株×¥1,000 = ¥100,000 制約
 MARKET_CAP_MIN_JPY = 3_000_000_000         # ¥3 billion
 LIQUIDITY_MIN_JPY = 100_000_000            # ¥100 million (5-day avg trading value)
 PBR_MIN = 0.5
@@ -12,24 +12,29 @@ EARNINGS_BLACKOUT_DAYS = 3                 # ±3 business days around earnings
 
 # --- Signal parameters ---
 MA_LONG = 75                               # long-term trend MA
-MA_SHORT = 5                               # short-term MA for reversal
-RSI_PERIOD = 5
-RSI_BUY_THRESHOLD = 45.0
+RSI_PERIOD = 14                            # 中期RSI
+RSI_BUY_LOWER = 35.0                       # 下限: これ未満は下落圧力強すぎ
+RSI_BUY_UPPER = 50.0                       # 上限: これ以上は押し目ではない
+VOLUME_SURGE_WINDOW = 20                   # 出来高サージ判定の平均期間
+VOLUME_SURGE_MULTIPLIER = 1.2              # 当日出来高 > 20日平均 × 1.2
 VOLATILITY_WINDOW = 20                     # 20-day std dev window
 HISTORY_DAYS_REQUIRED = 90                 # need 90 calendar days (~75 trading days) of data
 
 # --- Execution ---
 GAP_UP_CANCEL_THRESHOLD = Decimal("0.02")  # cancel if open > prev_close * 1.02
 SLIPPAGE_BUFFER = Decimal("0.02")          # 2% — same as gap-up threshold
+SHARES_PER_UNIT = 100                      # 単元株（100株単位）
 
 # --- Exit rules ---
-STOP_LOSS_RATE = Decimal("0.025")          # -2.5% from entry
-ATR_TRAILING_MULTIPLIER = Decimal("1.5")   # 1.5× ATR trailing stop
+STOP_LOSS_RATE = Decimal("0.025")          # -2.5% from entry (OCO逆指値で執行)
+ATR_TRAILING_MULTIPLIER = Decimal("2.5")   # 2.5× ATR trailing stop（旧1.5は小型株に対し狭すぎ）
+ATR_PERIOD = 14
 TIME_STOP_TRADING_DAYS = 5                 # force exit after 5 trading days
-TARGET_PROFIT_RATE = Decimal("0.04")       # +4.0% take-profit (net after S-share spread)
+TARGET_PROFIT_RATE = Decimal("0.06")       # +6.0% take-profit (単元株・SBIゼロ革命で手数料0)
 
 # --- Risk management ---
-CIRCUIT_BREAKER_LOSS_JPY = Decimal("30000")
+CIRCUIT_BREAKER_LOSS_JPY = Decimal("30000")    # Phase 1: 投資資本×30%
+CIRCUIT_BREAKER_LOSS_RATE = Decimal("0.30")    # Phase 2/3 は 0.15 に厳格化
 
 # --- Capital ---
 DEFAULT_BUDGET_JPY = Decimal("100000")
@@ -39,8 +44,10 @@ ANOMALY_PRICE_CHANGE_MAX = 0.30            # ±30% daily move → skip ticker
 VOLUME_SPIKE_MAX_RATIO = 50.0              # > 50× 20-day median → skip
 NAN_RATIO_MAX = 0.01                       # > 1% NaN → skip
 
-# --- S-share (S株) specific ---
-SSHARE_SPREAD_RATE = Decimal("0.005")          # 0.5% implicit spread (ask/bid) at SBI S株
+# --- 単元株（単元株取引）---
+# 旧S株のスプレッド設定は撤去。SBI証券ゼロ革命適用で国内株式手数料は0円、
+# 単元株は板取引のため買値/売値の事実上のスプレッドも極小（流動性フィルタで担保）。
+EXECUTION_SPREAD_RATE = Decimal("0.0")
 
 # --- Execution guard ---
 EXECUTION_GUARD_HOUR_JST = 20                  # only run at or after 20:00 JST

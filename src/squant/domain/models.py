@@ -73,6 +73,7 @@ class ExitDecision:
     reason: ExitReason | None
     note: str
     updated_trailing_stop: Decimal | None = None  # new trailing stop if updated
+    exit_price: Decimal | None = None              # ザラ場約定モードでの想定約定価格
 
 
 @dataclass

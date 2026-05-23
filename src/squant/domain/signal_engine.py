@@ -7,10 +7,12 @@ import pandas as pd
 
 from squant.config.constants import (
     MA_LONG,
-    MA_SHORT,
-    RSI_BUY_THRESHOLD,
+    RSI_BUY_LOWER,
+    RSI_BUY_UPPER,
     RSI_PERIOD,
     VOLATILITY_WINDOW,
+    VOLUME_SURGE_MULTIPLIER,
+    VOLUME_SURGE_WINDOW,
 )
 from squant.domain.indicators import rolling_std, rsi, sma, volume_surge_ratio
 from squant.domain.models import Candidate
@@ -22,12 +24,23 @@ def detect_signals(
     fundamentals: pd.DataFrame,
     as_of: date,
 ) -> list[Candidate]:
-    """Apply 4 buy conditions; return all passing Candidates.
+    """改訂版シグナル（4条件すべて必要）:
+    ① 終値 > 75日MA（長期上昇トレンド）
+    ② 35 < RSI(14) < 50（押し目ゾーン）
+    ③ 20日標準偏差 < 過去平均（ボラ収縮）
+    ④ 当日出来高 > 20日平均出来高 × 1.2（実需を伴う反転）
 
-    ohlcv: DataFrame with ticker as column, date as index, values are adjusted close.
+    ohlcv: ticker をカラム、日付を index にもつ調整済み終値 DataFrame。
+           出来高は f"{ticker}_vol" カラムに格納される想定。
     """
     candidates: list[Candidate] = []
-    dropped = {"no_data": 0, "cond1_trend": 0, "cond2_rsi": 0, "cond3_volatility": 0, "cond4_ma_vol": 0}
+    dropped = {
+        "no_data": 0,
+        "cond1_trend": 0,
+        "cond2_rsi": 0,
+        "cond3_volatility": 0,
+        "cond4_volume": 0,
+    }
 
     for ticker in filtered_tickers:
         if ticker not in ohlcv.columns:
@@ -39,20 +52,20 @@ def detect_signals(
             dropped["no_data"] += 1
             continue
 
-        # Condition 1: close > 75-day MA (long-term uptrend)
+        # ① トレンド: 終値 > 75日MA
         ma_long = sma(close, MA_LONG)
         if pd.isna(ma_long.iloc[-1]) or close.iloc[-1] <= ma_long.iloc[-1]:
             dropped["cond1_trend"] += 1
             continue
 
-        # Condition 2: RSI(14) < 45 (pullback)
+        # ② RSI(14) 押し目ゾーン
         rsi_series = rsi(close, RSI_PERIOD)
         last_rsi = rsi_series.iloc[-1]
-        if pd.isna(last_rsi) or last_rsi >= RSI_BUY_THRESHOLD:
+        if pd.isna(last_rsi) or last_rsi <= RSI_BUY_LOWER or last_rsi >= RSI_BUY_UPPER:
             dropped["cond2_rsi"] += 1
             continue
 
-        # Condition 3: 20-day std below historical mean (volatility contraction)
+        # ③ ボラ収縮
         std_series = rolling_std(close, VOLATILITY_WINDOW)
         last_std = std_series.iloc[-1]
         hist_mean_std = std_series.iloc[:-1].mean()
@@ -60,29 +73,26 @@ def detect_signals(
             dropped["cond3_volatility"] += 1
             continue
 
-        # Condition 4: close > 5-day MA AND today volume > yesterday volume
-        ma_short = sma(close, MA_SHORT)
-        if pd.isna(ma_short.iloc[-1]) or close.iloc[-1] <= ma_short.iloc[-1]:
-            dropped["cond4_ma_vol"] += 1
-            continue
-
+        # ④ 出来高サージ: 当日出来高 > 20日平均 × 1.2
         vol_col = f"{ticker}_vol"
         if vol_col in ohlcv.columns:
             vol = ohlcv[vol_col]
         elif hasattr(ohlcv, "volume") and ticker in ohlcv.volume.columns:
             vol = ohlcv.volume[ticker]
         else:
-            dropped["cond4_ma_vol"] += 1
+            dropped["cond4_volume"] += 1
             continue
 
         vol_clean = vol.dropna()
-        if len(vol_clean) < 2 or vol_clean.iloc[-1] <= vol_clean.iloc[-2]:
-            dropped["cond4_ma_vol"] += 1
+        if len(vol_clean) < VOLUME_SURGE_WINDOW + 1:
+            dropped["cond4_volume"] += 1
             continue
 
-        # Compute volume surge ratio for ranking
-        vol_surge = volume_surge_ratio(vol_clean, window=20)
-        last_surge = float(vol_surge.iloc[-1]) if not pd.isna(vol_surge.iloc[-1]) else 0.0
+        vol_surge = volume_surge_ratio(vol_clean, window=VOLUME_SURGE_WINDOW)
+        last_surge = vol_surge.iloc[-1]
+        if pd.isna(last_surge) or float(last_surge) < VOLUME_SURGE_MULTIPLIER:
+            dropped["cond4_volume"] += 1
+            continue
 
         fund = fundamentals.loc[ticker] if ticker in fundamentals.index else None
         pbr = float(fund.get("pbr", 99.0)) if fund is not None else 99.0
@@ -93,7 +103,7 @@ def detect_signals(
                 ticker=ticker,
                 close=Decimal(str(round(close.iloc[-1], 1))),
                 rsi14=float(last_rsi),
-                volume_surge_ratio=last_surge,
+                volume_surge_ratio=float(last_surge),
                 pbr=pbr,
                 market_cap_jpy=mcap,
             )
@@ -106,7 +116,7 @@ def detect_signals(
         f"cond1_trend={dropped['cond1_trend']} "
         f"cond2_rsi={dropped['cond2_rsi']} "
         f"cond3_volatility={dropped['cond3_volatility']} "
-        f"cond4_ma_vol={dropped['cond4_ma_vol']} "
+        f"cond4_volume={dropped['cond4_volume']} "
         f"passed={len(candidates)}"
     )
     return candidates

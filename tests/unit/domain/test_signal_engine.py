@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from squant.config.constants import MA_LONG, RSI_BUY_THRESHOLD
+from squant.config.constants import MA_LONG, RSI_BUY_UPPER, VOLUME_SURGE_MULTIPLIER, VOLUME_SURGE_WINDOW
 from squant.domain.signal_engine import detect_signals
 
 AS_OF = date(2026, 5, 11)
@@ -19,17 +19,20 @@ N = MA_LONG + 20  # enough days for all indicators
 def _make_ohlcv(
     ticker: str,
     prices: list[float] | np.ndarray,
-    vol_today_gt_yesterday: bool = True,
+    vol_surge: bool = True,
 ) -> pd.DataFrame:
-    """Build ohlcv DataFrame with ticker and ticker_vol columns."""
+    """Build ohlcv DataFrame with ticker and ticker_vol columns.
+
+    vol_surge=True: 当日出来高を20日平均×1.5にして④条件を通す。
+    """
     n = len(prices)
     idx = pd.date_range(end=AS_OF, periods=n, freq="B")
     base_vol = 1_000_000.0
     vols = [base_vol] * n
-    if vol_today_gt_yesterday:
-        vols[-1] = base_vol * 1.5  # today > yesterday
+    if vol_surge:
+        vols[-1] = base_vol * (float(VOLUME_SURGE_MULTIPLIER) + 0.3)  # well above threshold
     else:
-        vols[-1] = base_vol * 0.5  # today < yesterday
+        vols[-1] = base_vol * 0.5  # below threshold
     return pd.DataFrame(
         {ticker: prices, f"{ticker}_vol": vols},
         index=idx,
@@ -81,23 +84,21 @@ class TestDetectSignals:
         assert result == []
 
     def test_cond2_rsi_too_high_dropped(self):
-        """Steady uptrend with no pullback → RSI stays high → no signal."""
+        """Steady uptrend with no pullback → RSI(14) stays above upper bound → no signal."""
         prices = np.linspace(400.0, 600.0, N)  # monotonic up
         ohlcv = _make_ohlcv("1234.T", prices)
         fund = _make_fund("1234.T")
         result = detect_signals(["1234.T"], ohlcv, fund, AS_OF)
-        # RSI after steady uptrend should be well above RSI_BUY_THRESHOLD
+        # RSI(14) after steady uptrend will be well above RSI_BUY_UPPER (50)
         assert result == []
 
-    def test_cond4_decreasing_volume_dropped(self):
-        """Volume today < yesterday → no signal even if price conditions pass."""
+    def test_cond4_no_volume_surge_dropped(self):
+        """Volume below 20-day avg × 1.2 → no signal even if price conditions pass."""
         prices = _uptrend_then_pullback()
-        ohlcv = _make_ohlcv("1234.T", prices, vol_today_gt_yesterday=False)
+        ohlcv = _make_ohlcv("1234.T", prices, vol_surge=False)
         fund = _make_fund("1234.T")
         result = detect_signals(["1234.T"], ohlcv, fund, AS_OF)
-        # May or may not pass other conditions, but volume condition should filter
-        # (we just verify it runs without error — exact outcome depends on data)
-        assert isinstance(result, list)
+        assert result == []
 
     def test_cond4_no_volume_column_dropped(self):
         """Missing volume column → ticker dropped."""
@@ -112,7 +113,7 @@ class TestDetectSignals:
         """When a signal passes, Candidate has expected fields."""
         ticker = "5678.T"
         prices = close_series_bullish.values
-        ohlcv = _make_ohlcv(ticker, prices, vol_today_gt_yesterday=True)
+        ohlcv = _make_ohlcv(ticker, prices, vol_surge=True)
         fund = _make_fund(ticker, pbr=0.75)
         result = detect_signals([ticker], ohlcv, fund, AS_OF)
         if result:  # only assert if signal generated (data-dependent)
@@ -121,7 +122,7 @@ class TestDetectSignals:
             assert isinstance(c.close, Decimal)
             assert 0.0 <= c.rsi14 <= 100.0
             assert c.pbr == pytest.approx(0.75)
-            assert c.volume_surge_ratio >= 0.0
+            assert c.volume_surge_ratio >= float(VOLUME_SURGE_MULTIPLIER)
 
     def test_multiple_tickers_independent(self):
         """Each ticker evaluated independently."""

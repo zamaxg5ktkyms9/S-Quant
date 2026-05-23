@@ -1,11 +1,21 @@
-"""Position exit rule evaluation — pure business logic, no I/O."""
+"""Position exit rule evaluation — pure business logic, no I/O.
+
+改訂版:
+- トレーリングストップ基準を「直近高値 - 2.5×ATR」に変更（ラチェット成立）
+- ザラ場約定モードを追加（intraday_high/low を渡せばOCO逆指値・指値の発動を再現）
+"""
 
 from datetime import date
 from decimal import Decimal
 
 import pandas as pd
 
-from squant.config.constants import ATR_TRAILING_MULTIPLIER, GAP_UP_CANCEL_THRESHOLD
+from squant.config.constants import (
+    ATR_PERIOD,
+    ATR_TRAILING_MULTIPLIER,
+    GAP_UP_CANCEL_THRESHOLD,
+    TIME_STOP_TRADING_DAYS,
+)
 from squant.domain.enums import ExitReason
 from squant.domain.indicators import atr
 from squant.domain.models import ExitDecision, Position
@@ -20,84 +30,121 @@ def evaluate_exit(
     high_series: pd.Series,
     low_series: pd.Series,
     close_series: pd.Series,
+    intraday_high: Decimal | None = None,
+    intraday_low: Decimal | None = None,
 ) -> ExitDecision:
-    """Determine if the position should be exited and compute updated trailing stop.
+    """ポジションの出口判定。
+
+    ザラ場モード（intraday_high/low を渡す）:
+      - 当日high/lowがストップ・利確価格を到達したかでOCO発動を判定
+      - exit_price フィールドに約定価格（ストップ/利確価格そのもの）を返す
+    終値モード（intraday_*=None）:
+      - 旧来通り終値で判定。exit_price は None（呼び出し側で latest_close 使用）
 
     Exit priority:
-    1. Time stop (5 trading days) — always honoured first
-    2. Hard stop-loss — emergency floor
-    3. Trailing stop — trend-following floor
-    4. Take-profit (net +4% after S-share spread) — reward capture
+      1. Hard stop-loss (ザラ場発動 or 終値到達)
+      2. Trailing stop (上記と同じ)
+      3. Take-profit
+      4. Time stop (5営業日経過時、終値で決済前提)
     """
-    # 1. Time stop: 5 trading days elapsed
     days_held = count_trading_days(position.entry_date, today)
-    if days_held >= 5:
-        return ExitDecision(
-            should_exit=True,
-            reason=ExitReason.TIME_STOP,
-            note=f"Held {days_held} trading days (limit 5)",
-        )
 
-    # 2. Compute updated trailing stop via 1.5× ATR
+    # --- トレーリングストップ更新（直近高値 - 2.5×ATR）---
+    today_high_for_update = intraday_high if intraday_high is not None else latest_close
+    new_highest = max(position.highest_price_since_entry, today_high_for_update)
     updated_trailing = _compute_trailing_stop(
-        position, latest_close, high_series, low_series, close_series
+        position, new_highest, high_series, low_series, close_series
     )
+    effective_stop = max(position.stop_loss_price, updated_trailing)
+    tp_price = compute_take_profit_price(position.entry_price)
 
-    # 3. Hard stop-loss check
-    if latest_close <= position.stop_loss_price:
+    intraday_mode = intraday_high is not None and intraday_low is not None
+
+    # --- 1. ハードストップロス（最優先） ---
+    if intraday_mode and intraday_low <= position.stop_loss_price:
         return ExitDecision(
             should_exit=True,
             reason=ExitReason.STOP_LOSS,
-            note=f"Close ¥{latest_close} ≤ stop-loss ¥{position.stop_loss_price}",
+            note=f"Intraday low ¥{intraday_low} ≤ stop ¥{position.stop_loss_price}",
+            updated_trailing_stop=updated_trailing,
+            exit_price=position.stop_loss_price,
+        )
+    if not intraday_mode and latest_close <= position.stop_loss_price:
+        return ExitDecision(
+            should_exit=True,
+            reason=ExitReason.STOP_LOSS,
+            note=f"Close ¥{latest_close} ≤ stop ¥{position.stop_loss_price}",
             updated_trailing_stop=updated_trailing,
         )
 
-    # 4. Trailing stop check
-    effective_stop = max(position.stop_loss_price, updated_trailing)
-    if latest_close <= effective_stop:
+    # --- 2. トレーリングストップ ---
+    if intraday_mode and intraday_low <= effective_stop:
         return ExitDecision(
             should_exit=True,
             reason=ExitReason.TRAILING_STOP,
-            note=f"Close ¥{latest_close} ≤ trailing stop ¥{effective_stop}",
+            note=f"Intraday low ¥{intraday_low} ≤ trailing ¥{effective_stop}",
+            updated_trailing_stop=updated_trailing,
+            exit_price=effective_stop,
+        )
+    if not intraday_mode and latest_close <= effective_stop:
+        return ExitDecision(
+            should_exit=True,
+            reason=ExitReason.TRAILING_STOP,
+            note=f"Close ¥{latest_close} ≤ trailing ¥{effective_stop}",
             updated_trailing_stop=updated_trailing,
         )
 
-    # 5. Take-profit check — net +4% after S-share spread on both legs
-    tp_price = compute_take_profit_price(position.entry_price)
-    if latest_close >= tp_price:
+    # --- 3. 利確 ---
+    if intraday_mode and intraday_high >= tp_price:
         return ExitDecision(
             should_exit=True,
             reason=ExitReason.TAKE_PROFIT,
-            note=(
-                f"Close ¥{latest_close} ≥ take-profit ¥{round(tp_price, 1)} "
-                "(net +4% after S株スプレッド)"
-            ),
+            note=f"Intraday high ¥{intraday_high} ≥ TP ¥{round(tp_price, 1)}",
             updated_trailing_stop=updated_trailing,
+            exit_price=tp_price,
+        )
+    if not intraday_mode and latest_close >= tp_price:
+        return ExitDecision(
+            should_exit=True,
+            reason=ExitReason.TAKE_PROFIT,
+            note=f"Close ¥{latest_close} ≥ TP ¥{round(tp_price, 1)}",
+            updated_trailing_stop=updated_trailing,
+        )
+
+    # --- 4. タイムストップ（5営業日経過）---
+    # 設計上は「5日目の引け後通知→翌朝成行」だが、バックテスト簡略化として
+    # 5日目の終値で約定とみなす（ザラ場モードでも終値ベース）。
+    if days_held >= TIME_STOP_TRADING_DAYS:
+        return ExitDecision(
+            should_exit=True,
+            reason=ExitReason.TIME_STOP,
+            note=f"Held {days_held} trading days (limit {TIME_STOP_TRADING_DAYS})",
+            updated_trailing_stop=updated_trailing,
+            exit_price=latest_close if intraday_mode else None,
         )
 
     return ExitDecision(
         should_exit=False,
         reason=None,
-        note=f"HOLD ({days_held} days, RSI check at signal)",
+        note=f"HOLD ({days_held} days)",
         updated_trailing_stop=updated_trailing,
     )
 
 
 def _compute_trailing_stop(
     position: Position,
-    latest_close: Decimal,
+    highest_price: Decimal,
     high_series: pd.Series,
     low_series: pd.Series,
     close_series: pd.Series,
 ) -> Decimal:
-    """Compute 1.5× ATR trailing stop; only ratchets up, never down."""
-    atr_series = atr(high_series, low_series, close_series, period=14)
+    """トレーリングストップ = max(現在値, 直近高値 - 乗数×ATR)。下方にはラチェットしない。"""
+    atr_series = atr(high_series, low_series, close_series, period=ATR_PERIOD)
     if atr_series.empty or pd.isna(atr_series.iloc[-1]):
         return position.trailing_stop_price
 
     latest_atr = Decimal(str(round(float(atr_series.iloc[-1]), 2)))
-    new_stop = latest_close - ATR_TRAILING_MULTIPLIER * latest_atr
-    # Only ratchet up
+    new_stop = highest_price - ATR_TRAILING_MULTIPLIER * latest_atr
     return max(position.trailing_stop_price, new_stop)
 
 
