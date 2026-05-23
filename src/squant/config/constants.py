@@ -10,11 +10,11 @@ PBR_MAX = 2.0
 EQUITY_RATIO_MIN = 0.30                    # 30%
 EARNINGS_BLACKOUT_DAYS = 3                 # ±3 business days around earnings
 
-# --- Signal parameters ---
+# --- Signal parameters (Grid Search 2024-2025 ベスト採用) ---
 MA_LONG = 75                               # long-term trend MA
 RSI_PERIOD = 14                            # 中期RSI
 RSI_BUY_LOWER = 35.0                       # 下限: これ未満は下落圧力強すぎ
-RSI_BUY_UPPER = 50.0                       # 上限: これ以上は押し目ではない
+RSI_BUY_UPPER = 60.0                       # 上限: 50→60に拡張（grid searchで月+0.40%最大化）
 VOLUME_SURGE_WINDOW = 20                   # 出来高サージ判定の平均期間
 VOLUME_SURGE_MULTIPLIER = 1.2              # 当日出来高 > 20日平均 × 1.2
 VOLATILITY_WINDOW = 20                     # 20-day std dev window
@@ -25,11 +25,11 @@ GAP_UP_CANCEL_THRESHOLD = Decimal("0.02")  # cancel if open > prev_close * 1.02
 SLIPPAGE_BUFFER = Decimal("0.02")          # 2% — same as gap-up threshold
 SHARES_PER_UNIT = 100                      # 単元株（100株単位）
 
-# --- Exit rules ---
+# --- Exit rules (Grid Search 2024-2025 ベスト採用) ---
 STOP_LOSS_RATE = Decimal("0.025")          # -2.5% from entry (OCO逆指値で執行)
-ATR_TRAILING_MULTIPLIER = Decimal("2.5")   # 2.5× ATR trailing stop（旧1.5は小型株に対し狭すぎ）
+ATR_TRAILING_MULTIPLIER = Decimal("1.5")   # 1.5× ATR（grid searchで2.5→1.5。狭めの方が利益確保が早い）
 ATR_PERIOD = 14
-TIME_STOP_TRADING_DAYS = 5                 # force exit after 5 trading days
+TIME_STOP_TRADING_DAYS = 5                 # 3/5/7で大差なし、5日が安定
 TARGET_PROFIT_RATE = Decimal("0.06")       # +6.0% take-profit (単元株・SBIゼロ革命で手数料0)
 
 # --- Risk management ---
