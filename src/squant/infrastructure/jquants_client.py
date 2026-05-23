@@ -355,7 +355,6 @@ class JQuantsClient:
     def check_connectivity(self) -> bool:
         """Verify API key is valid using a known historical date (available on all plans)."""
         try:
-            self._limiter.wait()
             resp = httpx.get(
                 f"{_BASE_URL}/equities/bars/daily",
                 params={"code": "72030", "from": "2024-01-04", "to": "2024-01-05"},
