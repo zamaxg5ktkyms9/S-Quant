@@ -1,0 +1,102 @@
+{
+  "_meta": {
+    "report_date": "2026-05-23",
+    "strategy": "押し目モメンタム (Pullback Momentum)",
+    "phase": "Phase 1 baseline",
+    "git_branch": "master",
+    "data_source": "J-Quants Light Plan v2",
+    "universe_size": 282,
+    "universe_file": "data/universe.csv",
+    "backtest_script": "scripts/backtest.py",
+    "execution_model": "intraday OCO (high/low based fill)",
+    "entry_model": "next trading day's open (after signal close)",
+    "spread_model": "0.0 (SBI ゼロ革命適用)"
+  },
+  "period": {
+    "start": "2024-01-04",
+    "end": "2025-12-30",
+    "trading_days": 488,
+    "calendar_days": 727,
+    "years": 1.99
+  },
+  "capital": {
+    "initial": 100000,
+    "final_equity": 109526.75,
+    "currency": "JPY"
+  },
+  "parameters": {
+    "price_min": 100,
+    "price_max": 1000,
+    "market_cap_min_jpy": 3000000000,
+    "liquidity_min_jpy": 100000000,
+    "pbr_range": [0.5, 2.0],
+    "equity_ratio_min": 0.30,
+    "rsi_period": 14,
+    "rsi_lower": 35.0,
+    "rsi_upper": 60.0,
+    "volume_surge_multiplier": 1.2,
+    "volume_surge_window": 20,
+    "volatility_window": 20,
+    "stop_loss_rate": 0.025,
+    "atr_period": 14,
+    "atr_trailing_multiplier": 1.5,
+    "target_profit_rate": 0.06,
+    "time_stop_trading_days": 5,
+    "gap_up_cancel_threshold": 0.02,
+    "shares_per_unit": 100
+  },
+  "counts": {
+    "trades": 49,
+    "signals": 58,
+    "gap_up_skipped": 1,
+    "insufficient_skipped": 8,
+    "trades_per_month": 2.05,
+    "trades_per_year": 24.65,
+    "avg_holding_days": 3.71
+  },
+  "returns": {
+    "total_pnl_jpy": 9526.75,
+    "total_return_pct": 9.53,
+    "monthly_pnl_jpy": 398.92,
+    "monthly_pnl_pct": 0.40,
+    "cagr_pct": 4.68
+  },
+  "win_loss": {
+    "win_rate": 0.449,
+    "expectancy_jpy": 194.42,
+    "expectancy_pct": 0.31,
+    "avg_win_jpy": 2572.95,
+    "avg_loss_jpy": -1743.64,
+    "win_loss_ratio": 1.48,
+    "best_trade_jpy": 5517.0,
+    "worst_trade_jpy": -2411.25,
+    "max_consecutive_wins": 4,
+    "max_consecutive_losses": 7
+  },
+  "risk": {
+    "max_dd_jpy": -16763.5,
+    "max_dd_pct": -16.76,
+    "max_dd_duration_trades": 41,
+    "sharpe_ratio": 0.47,
+    "sortino_ratio": 0.90,
+    "calmar_ratio": 0.28,
+    "profit_factor": 1.20
+  },
+  "exit_distribution": {
+    "STOP_LOSS": {"count": 19, "win_rate": 0.00, "avg_pnl_jpy": -1999},
+    "TAKE_PROFIT": {"count": 7, "win_rate": 1.00, "avg_pnl_jpy": 4358},
+    "TRAILING_STOP": {"count": 13, "win_rate": 0.538, "avg_pnl_jpy": 621},
+    "TIME_STOP": {"count": 10, "win_rate": 0.80, "avg_pnl_jpy": 892}
+  },
+  "holding_period_distribution": {
+    "1d": {"count": 18, "win_rate": 0.278, "avg_pnl_jpy": -106},
+    "2d": {"count": 5,  "win_rate": 0.200, "avg_pnl_jpy": -832},
+    "3d": {"count": 3,  "win_rate": 0.333, "avg_pnl_jpy": -985},
+    "4d": {"count": 4,  "win_rate": 0.500, "avg_pnl_jpy": 249},
+    "5d": {"count": 2,  "win_rate": 1.000, "avg_pnl_jpy": 2883},
+    "6d": {"count": 5,  "win_rate": 0.400, "avg_pnl_jpy": 250},
+    "7d": {"count": 9,  "win_rate": 0.667, "avg_pnl_jpy": 347},
+    "8d": {"count": 2,  "win_rate": 1.000, "avg_pnl_jpy": 1850},
+    "10d": {"count": 1, "win_rate": 1.000, "avg_pnl_jpy": 3720}
+  }
+}

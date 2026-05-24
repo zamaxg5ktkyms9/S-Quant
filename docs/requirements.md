@@ -1,5 +1,9 @@
 # 要件
 
+> **関連ドキュメント**
+> - [docs/design.md](design.md) — 設計（戦略コンセプト・シグナル条件・出口ルール）
+> - [docs/backtest_report.md](backtest_report.md) — バックテスト結果報告書（2026-05-23）
+
 ## 投資方針（Phase 1）
 
 | 項目 | 内容 |

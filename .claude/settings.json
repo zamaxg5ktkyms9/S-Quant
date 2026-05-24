@@ -44,6 +44,8 @@
       "Bash(jobs *)",
       "Bash(history)",
       "Bash(history *)",
+      "Bash(mkdir)",
+      "Bash(mkdir *)",
       "Bash(awk *)",
       "Bash(sed *)",
       "Bash(curl *)",

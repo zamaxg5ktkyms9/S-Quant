@@ -1,5 +1,9 @@
 # 設計
 
+> **関連ドキュメント**
+> - [docs/requirements.md](requirements.md) — 要件（投資方針・リスク制約・段階拡大プラン）
+> - [docs/backtest_report.md](backtest_report.md) — バックテスト結果報告書（実測値・Grid Search・戦略選定の経緯）
+
 ## 戦略コンセプト
 
 本システムは「**上昇トレンド中の押し目を拾う短期モメンタム戦略**」を自動化したものです。

@@ -477,41 +477,145 @@ def _apply_param_overrides(args: argparse.Namespace) -> None:
 
 
 def _state_to_metrics(state: BacktestState, start: date, end: date) -> dict:
+    """業界標準のリスク・リターン指標を一式算出する。
+
+    主要指標（プロのファクトシート準拠）:
+    - CAGR: 年率複利成長率
+    - Sharpe Ratio: 取引リターン系列の年率化
+    - Sortino Ratio: 下方リスクのみで年率化
+    - Calmar Ratio: CAGR / |MaxDD%|
+    - Win Rate / Profit Factor / Expectancy
+    - Max Consecutive Wins / Losses
+    """
+    import math
+
     months = max(1.0, (end - start).days / 30.4)
+    years = max(1.0 / 12, (end - start).days / 365.25)
+    initial = float(state.initial_capital)
+
     pnl_list = [float(t.pnl) for t in state.trades]
+    pct_list = [t.pnl_pct for t in state.trades]
     wins = [p for p in pnl_list if p > 0]
     losses = [p for p in pnl_list if p < 0]
     total = sum(pnl_list)
+
     by_reason: dict[str, int] = {}
     for t in state.trades:
         by_reason[t.reason] = by_reason.get(t.reason, 0) + 1
 
-    pf = (sum(wins) / abs(sum(losses))) if losses else float("inf") if wins else 0.0
+    pf = (sum(wins) / abs(sum(losses))) if losses else (float("inf") if wins else 0.0)
 
+    # 累積エクイティ系列とドローダウン
     cumulative = 0.0
     peak = 0.0
     max_dd = 0.0
+    max_dd_duration = 0
+    dd_duration = 0
     for p in pnl_list:
         cumulative += p
-        peak = max(peak, cumulative)
+        if cumulative > peak:
+            peak = cumulative
+            dd_duration = 0
+        else:
+            dd_duration += 1
+            max_dd_duration = max(max_dd_duration, dd_duration)
         max_dd = min(max_dd, cumulative - peak)
 
+    # CAGR: (1 + total_return) ^ (1/years) - 1
+    final_equity = initial + total
+    total_return = total / initial if initial > 0 else 0.0
+    cagr = ((final_equity / initial) ** (1.0 / years) - 1.0) if initial > 0 and final_equity > 0 else -1.0
+
+    # Sharpe / Sortino: 取引リターン%系列を annualization
+    # 年あたり取引数で年率化（trade-based Sharpe）
+    n_trades = len(pct_list)
+    trades_per_year = (n_trades / years) if years > 0 else 0
+    if n_trades >= 2 and trades_per_year > 0:
+        mean_r = sum(pct_list) / n_trades / 100  # 比率に
+        var_r = sum((r / 100 - mean_r) ** 2 for r in pct_list) / (n_trades - 1)
+        std_r = math.sqrt(var_r)
+        sharpe = (mean_r / std_r * math.sqrt(trades_per_year)) if std_r > 0 else 0.0
+        # Sortino: 下方分散のみ
+        downside = [r / 100 for r in pct_list if r < 0]
+        if len(downside) >= 2:
+            dvar = sum((r - 0) ** 2 for r in downside) / (n_trades - 1)
+            dstd = math.sqrt(dvar)
+            sortino = (mean_r / dstd * math.sqrt(trades_per_year)) if dstd > 0 else 0.0
+        else:
+            sortino = float("inf") if mean_r > 0 else 0.0
+    else:
+        sharpe = 0.0
+        sortino = 0.0
+
+    # Calmar Ratio: CAGR / |MaxDD%|
+    max_dd_pct = max_dd / initial * 100
+    calmar = (cagr * 100 / abs(max_dd_pct)) if max_dd_pct != 0 else 0.0
+
+    # 連勝・連敗
+    max_wins = max_losses = cur_wins = cur_losses = 0
+    for p in pnl_list:
+        if p > 0:
+            cur_wins += 1
+            cur_losses = 0
+            max_wins = max(max_wins, cur_wins)
+        elif p < 0:
+            cur_losses += 1
+            cur_wins = 0
+            max_losses = max(max_losses, cur_losses)
+        else:
+            cur_wins = cur_losses = 0
+
+    avg_holding = (sum(t.holding_days for t in state.trades) / n_trades) if n_trades > 0 else 0.0
+
+    best_trade = max(pnl_list) if pnl_list else 0.0
+    worst_trade = min(pnl_list) if pnl_list else 0.0
+
+    avg_win = (sum(wins) / len(wins)) if wins else 0.0
+    avg_loss = (sum(losses) / len(losses)) if losses else 0.0
+    win_loss_ratio = (avg_win / abs(avg_loss)) if avg_loss != 0 else float("inf") if avg_win > 0 else 0.0
+
     return {
-        "trades": len(state.trades),
+        # 基本カウント
+        "trades": n_trades,
         "signals": state.signals_found,
         "gap_up_skipped": state.gap_up_skipped,
         "insufficient_skipped": state.insufficient_capital_skipped,
-        "win_rate": (len(wins) / len(pnl_list)) if pnl_list else 0.0,
+        "trades_per_month": n_trades / months,
+        "trades_per_year": trades_per_year,
+        "avg_holding_days": avg_holding,
+
+        # リターン
         "total_pnl": total,
+        "total_return_pct": total_return * 100,
         "monthly_pnl": total / months,
-        "monthly_pnl_pct": total / float(state.initial_capital) * 100 / months,
-        "expectancy": (total / len(pnl_list)) if pnl_list else 0.0,
-        "avg_win": (sum(wins) / len(wins)) if wins else 0.0,
-        "avg_loss": (sum(losses) / len(losses)) if losses else 0.0,
+        "monthly_pnl_pct": total / initial * 100 / months,
+        "cagr_pct": cagr * 100,
+        "final_equity": final_equity,
+
+        # 勝敗・期待値
+        "win_rate": (len(wins) / n_trades) if n_trades > 0 else 0.0,
+        "expectancy": (total / n_trades) if n_trades > 0 else 0.0,
+        "expectancy_pct": (sum(pct_list) / n_trades) if n_trades > 0 else 0.0,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "win_loss_ratio": win_loss_ratio,
+        "best_trade": best_trade,
+        "worst_trade": worst_trade,
+        "max_consecutive_wins": max_wins,
+        "max_consecutive_losses": max_losses,
+
+        # リスク
         "max_dd": max_dd,
-        "max_dd_pct": max_dd / float(state.initial_capital) * 100,
-        "profit_factor": pf,
-        "trades_per_month": len(state.trades) / months,
+        "max_dd_pct": max_dd_pct,
+        "max_dd_duration_trades": max_dd_duration,
+
+        # リスク調整後リターン
+        "sharpe_ratio": sharpe,
+        "sortino_ratio": sortino if sortino != float("inf") else None,
+        "calmar_ratio": calmar,
+        "profit_factor": pf if pf != float("inf") else None,
+
+        # 出口分布
         "by_reason": by_reason,
     }
 
