@@ -2,18 +2,27 @@
 Walk-Forward Analysis — 過剰最適化（in-sample over-fit）の検証
 
 手法:
-1. 全期間を in-sample / out-of-sample に2分割
-2. in-sample で grid search → ベストパラメータを抽出
-3. out-of-sample で固定パラメータバックテスト
-4. in-sample 性能と out-of-sample 性能を比較
+1. ローリング3窓（デフォルト）: 各窓で IS=1年・OOS=1年 を1年ずつスライド
+   - 窓1: IS=2022 → OOS=2023
+   - 窓2: IS=2023 → OOS=2024
+   - 窓3: IS=2024 → OOS=2025
+2. 各窓で IS grid search → ベストパラメータ抽出 → OOS で固定検証
+3. 各窓を「ロバスト判定基準」で pass/fail
+4. 全窓集計で全体 verdict
 
-過剰最適化が起きていれば、out-of-sample で性能が大幅劣化する。
-逆に両者が近ければ、戦略のロバスト性が示唆される。
+ロバスト判定基準（事前定義）:
+- OOS PF ≥ 1.0
+- OOS 月リターン ≥ +0.1%
+両方満たすとき "robust" 判定。
 
-実行例:
-    python scripts/walk_forward.py
-    # → IS: 2024-01〜2024-12 で grid search
-    #    OOS: 2025-01〜2025-12 で IS ベストパラメータをそのまま使う
+全体 verdict:
+- 2/3 窓以上 robust       → ✅ Robust（戦略採用可）
+- 1/3 窓 robust           → ⚠ Marginal（時期次第・要追加検証）
+- 0/3 窓 robust           → ❌ Overfitted / Non-viable（戦略撤退）
+
+単窓モード（後方互換）:
+    python scripts/walk_forward.py --single --is-start 2024-01-04 --is-end 2024-12-30 \
+        --oos-start 2025-01-06 --oos-end 2025-12-30
 """
 
 import argparse
@@ -24,11 +33,20 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-# grid_search.py から関数を取り込む
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from grid_search import GRID, run_one  # type: ignore
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# rolling 3窓（α案）。J-Quants Light Plan 4年データ範囲に合わせた設計。
+DEFAULT_WINDOWS: list[tuple[str, str, str, str]] = [
+    ("2022-01-04", "2022-12-30", "2023-01-04", "2023-12-29"),
+    ("2023-01-04", "2023-12-29", "2024-01-04", "2024-12-30"),
+    ("2024-01-04", "2024-12-30", "2025-01-06", "2025-12-30"),
+]
+
+ROBUST_PF_THRESHOLD = 1.0
+ROBUST_MONTHLY_PCT_THRESHOLD = 0.1
 
 
 def _runner(args_tuple):
@@ -61,119 +79,170 @@ def grid_search_period(start: str, end: str, workers: int) -> list[dict]:
     return results
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--is-start",   default="2024-01-04", help="In-sample 開始日")
-    parser.add_argument("--is-end",     default="2024-12-30", help="In-sample 終了日")
-    parser.add_argument("--oos-start",  default="2025-01-06", help="Out-of-sample 開始日")
-    parser.add_argument("--oos-end",    default="2025-12-30", help="Out-of-sample 終了日")
-    parser.add_argument("--workers", type=int, default=4)
-    args = parser.parse_args()
+def _is_robust(oos_metrics: dict) -> bool:
+    pf = oos_metrics.get("profit_factor") or 0
+    monthly = oos_metrics.get("monthly_pnl_pct", 0)
+    return pf >= ROBUST_PF_THRESHOLD and monthly >= ROBUST_MONTHLY_PCT_THRESHOLD
 
-    print(f"=" * 80)
-    print(f"Walk-Forward Analysis")
-    print(f"=" * 80)
-    print(f"In-Sample  : {args.is_start} 〜 {args.is_end}")
-    print(f"Out-of-Sample: {args.oos_start} 〜 {args.oos_end}")
-    print(f"並列度: {args.workers}")
-    print()
 
-    # === IN-SAMPLE: Grid Search ===
-    print(f"[1/3] In-Sample Grid Search", flush=True)
-    is_results = grid_search_period(args.is_start, args.is_end, args.workers)
+def evaluate_window(
+    is_start: str, is_end: str, oos_start: str, oos_end: str,
+    workers: int, label: str,
+) -> dict | None:
+    """1窓を評価して IS/OOS メトリクスと robust 判定を返す。失敗時 None。"""
+    print(f"\n{'='*80}")
+    print(f"[Window {label}]  IS={is_start}〜{is_end}  OOS={oos_start}〜{oos_end}")
+    print(f"{'='*80}")
+
+    print(f"  [{label}-IS] Grid Search", flush=True)
+    is_results = grid_search_period(is_start, is_end, workers)
     if not is_results:
-        print("In-sample で結果が得られませんでした。")
-        sys.exit(1)
-
+        print(f"  ❌ Window {label}: IS で結果が得られず")
+        return None
     is_results.sort(key=lambda r: r["monthly_pnl_pct"], reverse=True)
     is_best = is_results[0]
     best_params = is_best["params"]
 
-    print()
-    print(f"  In-Sample ベストパラメータ:")
+    print(f"  [{label}-IS] Best:", end=" ")
     for k, v in best_params.items():
         if v is not None:
-            print(f"    {k}: {v}")
-    print(f"  In-Sample メトリクス:")
-    print(f"    trades={is_best['trades']}  win_rate={is_best['win_rate']*100:.1f}%  "
-          f"monthly={is_best['monthly_pnl_pct']:+.2f}%  PF={is_best.get('profit_factor', 0):.2f}  "
-          f"maxDD={is_best['max_dd_pct']:+.1f}%")
-    print()
+            print(f"{k}={v}", end=" ")
+    print(
+        f"\n  [{label}-IS] trades={is_best['trades']} "
+        f"monthly={is_best['monthly_pnl_pct']:+.2f}% "
+        f"PF={is_best.get('profit_factor') or 0:.2f} "
+        f"DD={is_best['max_dd_pct']:+.1f}%"
+    )
 
-    # === OUT-OF-SAMPLE: IS ベストパラメータで1回実行 ===
-    print(f"[2/3] Out-of-Sample 検証（IS ベストパラメータで実行）", flush=True)
-    oos_metrics = run_one(best_params, args.oos_start, args.oos_end)
+    print(f"  [{label}-OOS] 固定パラメータで実行", flush=True)
+    oos_metrics = run_one(best_params, oos_start, oos_end)
     if oos_metrics is None:
-        print("OOS バックテストに失敗しました。")
+        print(f"  ❌ Window {label}: OOS バックテスト失敗")
+        return None
+    print(
+        f"  [{label}-OOS] trades={oos_metrics['trades']} "
+        f"monthly={oos_metrics['monthly_pnl_pct']:+.2f}% "
+        f"PF={oos_metrics.get('profit_factor') or 0:.2f} "
+        f"DD={oos_metrics['max_dd_pct']:+.1f}%"
+    )
+
+    robust = _is_robust(oos_metrics)
+    print(f"  [{label}] Robust判定: {'✅ PASS' if robust else '❌ FAIL'}  "
+          f"(PF≥{ROBUST_PF_THRESHOLD}, monthly≥{ROBUST_MONTHLY_PCT_THRESHOLD}%)")
+
+    return {
+        "label": label,
+        "in_sample": {
+            "period": f"{is_start}〜{is_end}",
+            "best_params": best_params,
+            "metrics": is_best,
+        },
+        "out_of_sample": {
+            "period": f"{oos_start}〜{oos_end}",
+            "metrics": oos_metrics,
+        },
+        "robust": robust,
+    }
+
+
+def _print_summary(windows: list[dict]) -> str:
+    """全窓のサマリを表で出力し、全体 verdict 文字列を返す。"""
+    print(f"\n{'='*80}")
+    print("Walk-Forward Summary")
+    print(f"{'='*80}")
+
+    header = f"{'Window':<8} {'IS period':<22} {'OOS period':<22} {'OOS trades':>10} {'OOS monthly%':>13} {'OOS PF':>7} {'OOS DD%':>8} {'Robust':>7}"
+    print(header)
+    print("-" * len(header))
+
+    robust_count = 0
+    for w in windows:
+        oos = w["out_of_sample"]["metrics"]
+        is_period = w["in_sample"]["period"]
+        oos_period = w["out_of_sample"]["period"]
+        pf = oos.get("profit_factor") or 0
+        robust = w["robust"]
+        if robust:
+            robust_count += 1
+        print(
+            f"{w['label']:<8} {is_period:<22} {oos_period:<22} "
+            f"{oos['trades']:>10d} {oos['monthly_pnl_pct']:>+12.2f}% "
+            f"{pf:>7.2f} {oos['max_dd_pct']:>+7.1f}% "
+            f"{'✅' if robust else '❌':>7}"
+        )
+
+    n = len(windows)
+    threshold = (n + 1) // 2  # 過半数: n=1→1, n=2→1, n=3→2
+    print(f"\nロバスト窓: {robust_count}/{n}")
+    if n >= 3 and robust_count >= 2:
+        verdict = f"✅ Robust ({robust_count}/{n} 窓で基準達成) — 戦略採用検討可"
+    elif n < 3 and robust_count >= threshold:
+        verdict = f"⚠ Inconclusive ({robust_count}/{n} 窓・サンプル少) — 追加窓で再検証推奨"
+    elif robust_count >= 1:
+        verdict = f"⚠ Marginal ({robust_count}/{n} 窓のみ達成) — 時期依存・追加検証推奨"
+    else:
+        verdict = f"❌ Overfitted / Non-viable (0/{n} 窓で基準未達) — 戦略撤退検討"
+
+    print(f"Verdict: {verdict}")
+    return verdict
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--single", action="store_true",
+        help="単窓モード（後方互換）。--is-start/--is-end/--oos-start/--oos-end を要求"
+    )
+    parser.add_argument("--is-start",   default="2024-01-04")
+    parser.add_argument("--is-end",     default="2024-12-30")
+    parser.add_argument("--oos-start",  default="2025-01-06")
+    parser.add_argument("--oos-end",    default="2025-12-30")
+    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--out-label", default="rolling3", help="出力JSONのファイル名ラベル")
+    args = parser.parse_args()
+
+    print(f"{'='*80}")
+    print(f"Walk-Forward Analysis")
+    print(f"{'='*80}")
+
+    if args.single:
+        windows_def = [(args.is_start, args.is_end, args.oos_start, args.oos_end)]
+        print(f"Mode: single window")
+    else:
+        windows_def = DEFAULT_WINDOWS
+        print(f"Mode: rolling {len(windows_def)} windows (default α案)")
+    print(f"並列度: {args.workers}")
+    print(f"ロバスト基準: OOS PF ≥ {ROBUST_PF_THRESHOLD} AND OOS 月リターン ≥ {ROBUST_MONTHLY_PCT_THRESHOLD}%")
+
+    window_results: list[dict] = []
+    for i, (is_s, is_e, oos_s, oos_e) in enumerate(windows_def, 1):
+        label = f"W{i}"
+        r = evaluate_window(is_s, is_e, oos_s, oos_e, args.workers, label)
+        if r is None:
+            print(f"⚠ Window {label} スキップ")
+            continue
+        window_results.append(r)
+
+    if not window_results:
+        print("\n全窓で結果が得られませんでした。")
         sys.exit(1)
 
-    print()
-    print(f"  Out-of-Sample メトリクス:")
-    print(f"    trades={oos_metrics['trades']}  win_rate={oos_metrics['win_rate']*100:.1f}%  "
-          f"monthly={oos_metrics['monthly_pnl_pct']:+.2f}%  "
-          f"PF={oos_metrics.get('profit_factor') or 0:.2f}  "
-          f"maxDD={oos_metrics['max_dd_pct']:+.1f}%")
-    print()
+    verdict = _print_summary(window_results)
 
-    # === 比較レポート ===
-    print(f"[3/3] IS vs OOS 比較")
-    print(f"-" * 80)
-    rows = [
-        ("Trades",        f"{is_best['trades']}",                       f"{oos_metrics['trades']}"),
-        ("Win Rate (%)",  f"{is_best['win_rate']*100:.1f}",             f"{oos_metrics['win_rate']*100:.1f}"),
-        ("Monthly (%)",   f"{is_best['monthly_pnl_pct']:+.2f}",          f"{oos_metrics['monthly_pnl_pct']:+.2f}"),
-        ("Total P&L",     f"¥{is_best['total_pnl']:+,.0f}",              f"¥{oos_metrics['total_pnl']:+,.0f}"),
-        ("CAGR (%)",      f"{is_best.get('cagr_pct', 0):+.2f}",          f"{oos_metrics.get('cagr_pct', 0):+.2f}"),
-        ("Sharpe",        f"{is_best.get('sharpe_ratio', 0):.2f}",       f"{oos_metrics.get('sharpe_ratio', 0):.2f}"),
-        ("Sortino",       f"{is_best.get('sortino_ratio') or 0:.2f}",    f"{oos_metrics.get('sortino_ratio') or 0:.2f}"),
-        ("Calmar",        f"{is_best.get('calmar_ratio', 0):.2f}",       f"{oos_metrics.get('calmar_ratio', 0):.2f}"),
-        ("Profit Factor", f"{is_best.get('profit_factor') or 0:.2f}",    f"{oos_metrics.get('profit_factor') or 0:.2f}"),
-        ("Max DD (%)",    f"{is_best['max_dd_pct']:+.1f}",               f"{oos_metrics['max_dd_pct']:+.1f}"),
-    ]
-    print(f"  {'Metric':<18} {'In-Sample':>14}  {'Out-of-Sample':>14}")
-    print(f"  {'-'*18} {'-'*14}  {'-'*14}")
-    for label, isv, oosv in rows:
-        print(f"  {label:<18} {isv:>14}  {oosv:>14}")
-
-    # 性能劣化率
-    def _pct_change(is_v: float, oos_v: float) -> str:
-        if is_v == 0:
-            return "n/a"
-        ch = (oos_v - is_v) / abs(is_v) * 100
-        sign = "+" if ch >= 0 else ""
-        return f"{sign}{ch:.0f}%"
-
-    print()
-    print(f"  劣化率 (OOS - IS) / |IS|:")
-    print(f"    Monthly: {_pct_change(is_best['monthly_pnl_pct'], oos_metrics['monthly_pnl_pct'])}")
-    print(f"    PF     : {_pct_change(is_best.get('profit_factor') or 0, oos_metrics.get('profit_factor') or 0)}")
-    print(f"    Sharpe : {_pct_change(is_best.get('sharpe_ratio') or 0, oos_metrics.get('sharpe_ratio') or 0)}")
-    print()
-
-    # 過剰最適化の判定
-    is_m = is_best["monthly_pnl_pct"]
-    oos_m = oos_metrics["monthly_pnl_pct"]
-    if is_m > 0 and oos_m > 0 and oos_m >= is_m * 0.5:
-        verdict = "✅ Robust: OOS が IS の50%以上を維持。過剰最適化リスクは小さい"
-    elif is_m > 0 and oos_m > 0:
-        verdict = "⚠ Moderate: OOS が IS の半分以下に低下。やや過剰最適化の兆候"
-    elif is_m > 0 and oos_m <= 0:
-        verdict = "❌ Overfitted: IS でプラスだが OOS でマイナス。明確な過剰最適化"
-    else:
-        verdict = "判定不能: IS 自体がマイナス"
-    print(f"  Verdict: {verdict}")
-
-    # 保存
     out_dir = REPO_ROOT / "docs" / "backtests"
     out_dir.mkdir(parents=True, exist_ok=True)
     report = {
-        "in_sample": {"period": f"{args.is_start}〜{args.is_end}", "best_params": best_params, "metrics": is_best},
-        "out_of_sample": {"period": f"{args.oos_start}〜{args.oos_end}", "metrics": oos_metrics},
+        "mode": "single" if args.single else "rolling",
+        "robust_criteria": {
+            "profit_factor_min": ROBUST_PF_THRESHOLD,
+            "monthly_pnl_pct_min": ROBUST_MONTHLY_PCT_THRESHOLD,
+        },
+        "windows": window_results,
         "verdict": verdict,
     }
-    out_path = out_dir / f"walkforward_{args.is_start}_{args.oos_end}.json"
+    out_path = out_dir / f"walkforward_{args.out_label}.json"
     with out_path.open("w") as f:
-        json.dump(report, f, indent=2, ensure_ascii=False)
+        json.dump(report, f, indent=2, ensure_ascii=False, default=str)
     print(f"\n保存: {out_path}")
 
 
