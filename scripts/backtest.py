@@ -660,10 +660,37 @@ def main() -> None:
                 print(f"  {label}: {done}/{total} ({done/total*100:.0f}%)", flush=True)
         return _cb
 
-    if cache_file.exists():
+    def _find_compatible_cache() -> Path | None:
+        """必要期間 [fetch_start, end] をカバーする既存キャッシュを探す。
+        ファイル名フォーマット: data_{cached_fetch_start}_{cached_end}.pkl
+        cached_fetch_start <= fetch_start && cached_end >= end なら再利用可。
+        """
+        if not cache_dir.exists():
+            return None
+        candidates: list[tuple[Path, date, date]] = []
+        for p in cache_dir.glob("data_*.pkl"):
+            stem = p.stem.removeprefix("data_")
+            try:
+                cs_str, ce_str = stem.split("_")
+                cs = date.fromisoformat(cs_str)
+                ce = date.fromisoformat(ce_str)
+            except (ValueError, IndexError):
+                continue
+            if cs <= fetch_start and ce >= end:
+                candidates.append((p, cs, ce))
+        if not candidates:
+            return None
+        # 最も小さい（タイトな）カバー範囲を優先
+        candidates.sort(key=lambda x: (x[2] - x[1]).days)
+        return candidates[0][0]
+
+    usable_cache = cache_file if cache_file.exists() else _find_compatible_cache()
+
+    if usable_cache is not None:
         if not args.quiet:
-            print(f"キャッシュ読み込み中: {cache_file}", flush=True)
-        with cache_file.open("rb") as f:
+            note = "" if usable_cache == cache_file else " (期間カバー一致)"
+            print(f"キャッシュ読み込み中: {usable_cache}{note}", flush=True)
+        with usable_cache.open("rb") as f:
             cached = pickle.load(f)
         adj_close_full = cached["adj_close"]
         volume_full    = cached["volume"]
