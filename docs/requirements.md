@@ -1,8 +1,14 @@
 # 要件
 
+> ⚠ **2026-05-24 ステータス: Phase 1 paper trading は開始保留**
+> Walk-Forward Analysis で過剰最適化が検出されたため、現戦略の実運用開始は保留。
+> 戦略本体の見直し（候補B/C検証、ユニバース拡張、別アプローチ等）に進む。
+> 本ドキュメント記載の方針は、戦略改善後の運用フェーズで再評価する。
+
 > **関連ドキュメント**
 > - [docs/design.md](design.md) — 設計（戦略コンセプト・シグナル条件・出口ルール）
-> - [docs/backtest_report.md](backtest_report.md) — バックテスト結果報告書（2026-05-23）
+> - [docs/backtest_report.md](backtest_report.md) — バックテスト結果報告書（2026-05-23、Walk-Forward 2026-05-24追加）
+> - [docs/operator_guide.md](operator_guide.md) — 日次運用手順（戦略再開時に使用）
 
 ## 投資方針（Phase 1）
 

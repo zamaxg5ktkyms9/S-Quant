@@ -1,5 +1,14 @@
 # Operator Guide — S-Quant Phase 1
 
+> ⚠ **2026-05-24 ステータス: 開始保留**
+> Walk-Forward Analysis で過剰最適化が検出されたため、Phase 1 paper trading の開始は当面保留。
+> 戦略本体の見直しが完了し、Walk-Forward で robust と判定された段階で本ガイドの運用に進む。
+> 詳細: [docs/backtest_report.md Section 8.3](backtest_report.md#83-out-of-sample-robustness--walk-forward-analysis-実施結果2026-05-24) / [Section 11](backtest_report.md#111-conclusions2026-05-24-更新)
+>
+> **本ガイドは設計どおり戦略が機能した場合の運用フローを記述しています。再開時に再利用します。**
+
+---
+
 > **対象**: S-Quant の半自動運用を担当するオペレーター（=あなた）
 > **想定環境**: SBI証券（単元株・100株単位）+ Slack + GitHub Actions
 > **戦略**: 押し目モメンタム（[docs/backtest_report.md](backtest_report.md) 参照）

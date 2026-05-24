@@ -1,8 +1,14 @@
 # 設計
 
+> ⚠ **2026-05-24 ステータス: 戦略見直しフェーズ移行**
+> 本設計（押し目モメンタム + Grid Search ベストパラメータ）は Walk-Forward Analysis で過剰最適化と判定された。
+> シグナル条件・出口ルールの記述は履歴として残し、戦略本体の再設計に進む。
+> 詳細: [docs/backtest_report.md Section 8.3〜8.5](backtest_report.md)
+
 > **関連ドキュメント**
 > - [docs/requirements.md](requirements.md) — 要件（投資方針・リスク制約・段階拡大プラン）
-> - [docs/backtest_report.md](backtest_report.md) — バックテスト結果報告書（実測値・Grid Search・戦略選定の経緯）
+> - [docs/backtest_report.md](backtest_report.md) — バックテスト結果報告書（実測値・Grid Search・Walk-Forward）
+> - [docs/operator_guide.md](operator_guide.md) — 日次運用手順（戦略再開時に使用）
 
 ## 戦略コンセプト
 
