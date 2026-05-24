@@ -405,6 +405,27 @@ python scripts/grid_search.py --workers 4
 
 - [docs/requirements.md](requirements.md) — 投資方針・リスク制約・段階拡大プラン
 - [docs/design.md](design.md) — シグナル条件・出口ルール・発注フロー詳細
+- [docs/operator_guide.md](operator_guide.md) — オペレーター日次運用手順・開始チェックリスト
 - `scripts/backtest.py` — バックテストエンジン
 - `scripts/grid_search.py` — パラメータ探索
+- `scripts/walk_forward.py` — In-sample / Out-of-sample 検証
 - `data/universe.csv` — 対象銘柄リスト
+
+## Appendix D: Developer Notes — Known Structural Risks (No Immediate Action)
+
+以下は実装上の潜在リスクで、現状は表面化していないが将来同様の作業をする際に注意。
+
+### D-1. `JQuantsClient._RateLimiter` のサブプロセス並列リスク
+
+[src/squant/infrastructure/jquants_client.py](../src/squant/infrastructure/jquants_client.py) の `_RateLimiter` は **インスタンスローカル**で、複数サブプロセスが同時起動すると合計 RPM が J-Quants Light の制限（60 req/min）を超過し得る。
+
+**今は表面化しない理由**: `scripts/backtest.py` のキャッシュ再利用ロジック（既存キャッシュが必要期間をカバーするなら再利用）で「並列実行時に API を叩かない」状態になっているため。
+
+**再発条件**: キャッシュ未生成の期間で `scripts/grid_search.py` または `scripts/walk_forward.py` を回す。
+
+**対策案（必要になったら）**:
+- スクリプト冒頭でキャッシュ存在をチェックし、未生成期間なら `--workers 1` を強制
+- または、事前に `scripts/backtest.py` をフル期間で1回走らせる手順を README に明記
+- 抜本対策として、`_RateLimiter` を `multiprocessing.Manager` 経由の共有状態にする
+
+**初出**: 2026-05-24 の Walk-Forward 実行で発覚（180通り × 4並列が3時間進まなかった事象）。`backtest.py` のキャッシュ互換ロジックで暫定回避済み。
