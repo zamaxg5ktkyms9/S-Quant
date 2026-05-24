@@ -340,6 +340,60 @@ Walk-Forward 結果を踏まえ、当初の「Phase 1 paper trading に進む」
 
 詳細メトリクスは [docs/backtests/walkforward_2024-01-04_2025-12-30.json](backtests/walkforward_2024-01-04_2025-12-30.json) に保存。
 
+### 8.7 Rolling 3-Window Walk-Forward 拡張試行（2026-05-25・部分実行で中断）
+
+#### 動機
+
+8.3 の単窓 Walk-Forward (IS=2024/OOS=2025) で過剰最適化を検出したが、「時期依存（2025年が特殊だっただけ）」か「構造的過剰最適化」かが切り分けられていなかった。Rolling 3窓へ拡張して再評価する方針。
+
+#### データ範囲の制約
+
+当初 6年（2020-2025）を狙ったが、J-Quants Light Plan の実測で **遡及は約4年（2022年以降）に制限**されることが判明。コロナショック・利上げ初期は取得不可。
+
+#### 採用設計
+
+- **データ**: 2022-01-04 〜 2025-12-30（4年・OHLCV 231 有効銘柄）
+- **窓構成**: rolling 3窓 IS=1年 / OOS=1年（α案）
+  - W1: IS=2022 → OOS=2023
+  - W2: IS=2023 → OOS=2024
+  - W3: IS=2024 → OOS=2025
+- **ロバスト判定基準**: OOS PF ≥ 1.0 かつ OOS 月リターン ≥ +0.1%
+
+#### 実行結果（部分・W1のみ完了）
+
+| Metric | W1 IS (2022) | W1 OOS (2023) |
+|---|---|---|
+| Best Params | TP=0.06, ATR=2.5, RSI≤60, TS=7 | (固定) |
+| Trades | 27 | 21 |
+| Monthly Return | +0.79% | **-1.27%** |
+| Profit Factor | 1.33 | **0.43** |
+| Max DD | -9.9% | -15.1% |
+| **Robust Verdict** | — | **❌ FAIL** |
+
+#### 中断理由
+
+W2 IS Grid Search で `grid_search.py` の `subprocess.run(timeout=120)` に多数の組み合わせがヒットして N/A 化（W1-IS は 78分かかった）。
+180 combos 中で完了したものから「Best」を選ぶことになり判定の信頼性が下がるため、残り W2/W3 (推定3時間) を待たず中断。
+
+#### 結論（単窓・W1 を合わせた 2/2 窓で OOS FAIL）
+
+| Window | IS Period | OOS Period | OOS Monthly | OOS PF | Robust |
+|---|---|---|---|---|---|
+| 8.3 単窓 | 2024 | 2025 | -0.21% | 0.77 | ❌ |
+| 8.7 W1 | 2022 | 2023 | -1.27% | 0.43 | ❌ |
+
+**2/2 窓で連続 OOS FAIL** → **押し目モメンタム＋単一銘柄集中は構造的に過剰最適化**と判定。残り W2/W3 を完了させても結論は変わらない見込み。
+
+#### Backtest engine の構造的ボトルネック（次フェーズで要解消）
+
+`backtest.py` のメインループに O(N) スケールしない遅さがあり、フル期間4年で4時間超、一部 1年期間でも 120秒超。`subprocess` 単位の起動オーバーヘッドと、毎営業日の `adj_close_full.loc[:str(today)]` スライスコピーが疑い。3銘柄分散実装時に同時に整理する。
+
+#### 次フェーズ
+
+- **B フェーズ**: 3銘柄分散実装（Position 複数保有・資金 1/3 割り当て・重複排除）
+- 目標を年¥240k → **年¥100k に下方修正**（NotebookLM レビュー指摘の現実路線化）
+- 3銘柄分散版で再度 Rolling 3窓 WF を実施（B-WF）
+
 ---
 
 ## 9. Strategy Iteration Log
@@ -349,6 +403,8 @@ Walk-Forward 結果を踏まえ、当初の「Phase 1 paper trading に進む」
 | 2026-05-23 | Initial (RSI 35-50, ATR×2.5) | -14.0% | 0.30 | 41.2% | ❌ 失敗 |
 | 2026-05-23 | Grid Search Best (RSI 35-60, ATR×1.5) | **+9.5%** | **1.20** | 44.9% | ✅ **採用** |
 | 2026-05-23 | Breakout Follow (20-day high break) | -16.9% | 0.72 | 33.3% | ❌ ダマシ多発、不採用 |
+| 2026-05-24 | Walk-Forward 単窓 IS=2024/OOS=2025 | IS-0.06% OOS-0.21% | OOS 0.77 | OOS 46.7% | ❌ Overfitted 検出 |
+| 2026-05-25 | Walk-Forward W1 IS=2022/OOS=2023 (拡張試行) | IS+9.5% OOS-12.7% | OOS 0.43 | OOS 23.8% | ❌ 2/2 窓連続 FAIL → **単一銘柄戦略撤退、3銘柄分散へ** |
 
 ### Rejected Strategy: Breakout Follow
 
