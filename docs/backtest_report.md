@@ -390,9 +390,45 @@ W2 IS Grid Search で `grid_search.py` の `subprocess.run(timeout=120)` に多�
 
 #### 次フェーズ
 
-- **B フェーズ**: 3銘柄分散実装（Position 複数保有・資金 1/3 割り当て・重複排除）
+- **B フェーズ**: 段階拡大型分散実装（Phase 1=2銘柄、Phase 2/3=3銘柄）
 - 目標を年¥240k → **年¥100k に下方修正**（NotebookLM レビュー指摘の現実路線化）
-- 3銘柄分散版で再度 Rolling 3窓 WF を実施（B-WF）
+- 段階拡大型分散版で再度 Rolling 3窓 WF を実施（B-WF）
+
+### 8.8 B フェーズ — 段階拡大型分散の設計案（2026-05-25・実装前）
+
+#### 動機（NotebookLM レビュー + A1 結果）
+
+- A1: 単一銘柄戦略は 2/2 窓 OOS FAIL → 戦略撤退
+- NotebookLM 指摘: 「1つのカゴに卵を全部盛る」設計は Phase 2/3 でサーキットブレーカー超過リスク大
+- ¥100,000 × 3銘柄 = ¥333/株上限 → ユニバース激減のため Phase 1 のみ 2銘柄に絞る段階拡大方式に決定
+
+#### 設計サマリ
+
+| 項目 | 仕様 |
+|---|---|
+| 同時保有 | Phase 1: 2銘柄、Phase 2/3: 3銘柄 |
+| 1銘柄予算 | **動的方式**: 残キャッシュ / 残空きスロット数 |
+| 同日複数シグナル | 空きスロット数まで同日同時エントリー可（ランキング上位順） |
+| 保有銘柄重複 | スクリーナー段階で `held_tickers` 集合を引数に取り除外 |
+| 各銘柄出口 | 完全独立（OCO・トレーリング・タイムストップは Position 単位） |
+| サーキットブレーカー | ポートフォリオ全体の累積実現損失で判定（個別銘柄ではない） |
+| パラメータ | A1 の Grid Search ベスト値を**そのまま流用**（RSI 35-60、TP +6%、ATR×1.5、TS 5日）|
+
+#### 実装範囲
+
+- **ドメイン層**: `models.Position` をリスト化、`screener.apply_fundamental_filters` の `held_tickers` 引数を活用、`ranking.rank` の `top_n` パラメータ化、`position_manager.evaluate_exit` を Position 単位の独立呼び出しに整理
+- **インフラ層**: `backtest.py` のメインループ高速化（既知ボトルネック）と複数 Position 対応、`daily_runner` と各 pipeline の複数 Position 対応、`sheets_repository` の portfolio タブを複数行スキーマに、`slack_formatter` で複数銘柄サマリ
+- **設定層**: `constants.MAX_POSITIONS_PHASE_1 = 2`、`MAX_POSITIONS_PHASE_2_3 = 3` の追加、`settings.max_positions` の Phase に応じた解決
+
+#### B-WF 計画
+
+- データキャッシュ: A1 で生成した `data_2021-07-08_2025-12-30.pkl` を流用
+- 窓構成: A1 と同じ rolling 3窓（IS=2022→OOS=2023, IS=2023→OOS=2024, IS=2024→OOS=2025）
+- 判定基準: A1 と同じ（OOS PF ≥ 1.0 かつ OOS 月リターン ≥ +0.1%、過半数窓で達成ならロバスト）
+- 期待される判断材料:
+  - 分散効果のみで月リターンが OOS でプラス化するか
+  - 分散効果で DD が縮小するか（-16.8% → -10% 台への改善が目標）
+  - それでも届かない場合はシグナル本質見直し（候補B: 5×25日 MA クロス）に進む
 
 ---
 
