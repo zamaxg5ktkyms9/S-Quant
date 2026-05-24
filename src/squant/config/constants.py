@@ -10,11 +10,14 @@ PBR_MAX = 2.0
 EQUITY_RATIO_MIN = 0.30                    # 30%
 EARNINGS_BLACKOUT_DAYS = 3                 # ±3 business days around earnings
 
-# --- Signal parameters (Grid Search 2024-2025 ベスト採用) ---
+# --- Signal parameters (押し目モメンタム / Grid Search 2024-2025 ベスト採用) ---
+# ※ 2026-05-23 にブレイクアウト追従型を試したが PF 0.72 と悪化したため、
+#   Grid Search ベスト（押し目モメンタム）に戻して実運用フェーズへ進む。
 MA_LONG = 75                               # long-term trend MA
 RSI_PERIOD = 14                            # 中期RSI
 RSI_BUY_LOWER = 35.0                       # 下限: これ未満は下落圧力強すぎ
-RSI_BUY_UPPER = 60.0                       # 上限: 50→60に拡張（grid searchで月+0.40%最大化）
+RSI_BUY_UPPER = 60.0                       # 上限: grid search ベスト（50→60で月+0.40%最大化）
+BREAKOUT_WINDOW = 20                       # （未使用・候補Aのアーカイブ用に保持）
 VOLUME_SURGE_WINDOW = 20                   # 出来高サージ判定の平均期間
 VOLUME_SURGE_MULTIPLIER = 1.2              # 当日出来高 > 20日平均 × 1.2
 VOLATILITY_WINDOW = 20                     # 20-day std dev window

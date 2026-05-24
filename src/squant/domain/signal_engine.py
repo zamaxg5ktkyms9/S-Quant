@@ -1,4 +1,11 @@
-"""Buy signal detection — pure functions over OHLCV DataFrames."""
+"""Buy signal detection — 押し目モメンタム / Grid Search 2024-2025 ベスト採用.
+
+戦略選定の経緯（2026-05-23）:
+1. 初回（RSI(14) 35-50・ボラ収縮・出来高サージ） → 月-0.59%、PF 0.30
+2. Grid Search 180通り → ベスト: RSI上限60、ATR×1.5 → 月+0.40%、PF 1.20
+3. ブレイクアウト追従への転換実験 → 月-0.71%、PF 0.72（悪化）
+4. → Grid Search ベスト（押し目モメンタム）に確定、実運用フェーズへ
+"""
 
 from datetime import date
 from decimal import Decimal
@@ -24,14 +31,11 @@ def detect_signals(
     fundamentals: pd.DataFrame,
     as_of: date,
 ) -> list[Candidate]:
-    """改訂版シグナル（4条件すべて必要）:
+    """4条件すべてを満たした銘柄を返す（押し目モメンタム）:
     ① 終値 > 75日MA（長期上昇トレンド）
-    ② 35 < RSI(14) < 50（押し目ゾーン）
-    ③ 20日標準偏差 < 過去平均（ボラ収縮）
-    ④ 当日出来高 > 20日平均出来高 × 1.2（実需を伴う反転）
-
-    ohlcv: ticker をカラム、日付を index にもつ調整済み終値 DataFrame。
-           出来高は f"{ticker}_vol" カラムに格納される想定。
+    ② RSI_BUY_LOWER < RSI(14) < RSI_BUY_UPPER（押し目〜中立ゾーン）
+    ③ 20日標準偏差 < 過去平均（ボラ収縮 = ブレイク前兆）
+    ④ 当日出来高 > 20日平均 × VOLUME_SURGE_MULTIPLIER（実需を伴う反転）
     """
     candidates: list[Candidate] = []
     dropped = {
@@ -87,7 +91,6 @@ def detect_signals(
         if len(vol_clean) < VOLUME_SURGE_WINDOW + 1:
             dropped["cond4_volume"] += 1
             continue
-
         vol_surge = volume_surge_ratio(vol_clean, window=VOLUME_SURGE_WINDOW)
         last_surge = vol_surge.iloc[-1]
         if pd.isna(last_surge) or float(last_surge) < VOLUME_SURGE_MULTIPLIER:
