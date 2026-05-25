@@ -114,3 +114,10 @@ def apply_fundamental_filters(
 def exclude_recent_sales(candidates_df: pd.DataFrame, forbidden_tickers: set[str]) -> pd.DataFrame:
     """Remove tickers subject to 差金決済 prohibition."""
     return candidates_df[~candidates_df["ticker"].isin(forbidden_tickers)].reset_index(drop=True)
+
+
+def exclude_held_positions(candidates_df: pd.DataFrame, held_tickers: set[str]) -> pd.DataFrame:
+    """Remove tickers already held to prevent duplicate-position concentration."""
+    if candidates_df.empty or not held_tickers:
+        return candidates_df
+    return candidates_df[~candidates_df["ticker"].isin(held_tickers)].reset_index(drop=True)

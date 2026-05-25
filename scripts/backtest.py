@@ -1,13 +1,19 @@
 """
-S-Quant バックテスト（改訂版・Phase 1 / 単元株 / ザラ場約定モード）
+S-Quant バックテスト（B フェーズ・分散版・単元株・ザラ場約定モード）
 
 実装方針:
 - エントリーは「シグナル日翌営業日の始値（=Open）で約定」と仮定
-  （旧版の「シグナル日の終値で即成立」より現実的）
-- ギャップアップ判定: 始値 > 前日終値 × 1.02 → エントリー見送り
+- ギャップアップ判定: 始値 > 前日終値 × 1.02 → その銘柄のエントリー見送り
 - 保有中の出口判定はザラ場モード（high/low使用、OCO逆指値・指値の発動を再現）
 - 株数は単元株（100株単位）で算出
 - スプレッド・手数料は0（SBI証券ゼロ革命適用）
+
+B フェーズ拡張 (2026-05-25):
+- 最大 max_positions 銘柄を同時保有（Phase 1: 2、Phase 2/3: 3）
+- 1銘柄予算は動的: floor(残キャッシュ / 残空きスロット数)
+- 同日複数シグナル可（空きスロット数までランキング上位順）
+- 保有銘柄・同日 pending は screener 後に除外（重複排除）
+- 各銘柄独立の出口判定（OCO・トレーリング・タイムストップ）
 
 ファンダメンタルズ:
 - 自己資本比率・発行済株数は最新値のみ。バックテスト各日でPBRのみ再計算（BPS逆算）。
@@ -34,7 +40,11 @@ except ImportError:
 import pandas as pd
 
 from squant.application.universe_loader import load_universe
-from squant.config.constants import GAP_UP_CANCEL_THRESHOLD, SHARES_PER_UNIT
+from squant.config.constants import (
+    DEFAULT_MAX_POSITIONS,
+    GAP_UP_CANCEL_THRESHOLD,
+    SHARES_PER_UNIT,
+)
 from squant.config.settings import Settings
 from squant.domain import ranking, screener, signal_engine
 from squant.domain.models import Position
@@ -70,14 +80,23 @@ class PendingEntry:
 
 @dataclass
 class BacktestState:
-    position: Position | None = None
+    positions: list[Position] = field(default_factory=list)
     cash: Decimal = Decimal("100000")
     initial_capital: Decimal = Decimal("100000")
+    max_positions: int = DEFAULT_MAX_POSITIONS
     trades: list[TradeRecord] = field(default_factory=list)
     signals_found: int = 0
     gap_up_skipped: int = 0
     insufficient_capital_skipped: int = 0
-    pending_entry: PendingEntry | None = None  # 翌営業日に約定判定
+    pending_entries: list[PendingEntry] = field(default_factory=list)  # 翌営業日に順次約定判定
+
+    @property
+    def open_slots(self) -> int:
+        return self.max_positions - len(self.positions)
+
+    @property
+    def held_tickers(self) -> set[str]:
+        return {p.ticker for p in self.positions}
 
 
 def _build_bps_map(fund_base: pd.DataFrame, adj_close_full: pd.DataFrame) -> dict[str, float]:
@@ -140,14 +159,15 @@ def _get_ohlc_for_date(
 
 def _process_pending_entry(
     state: BacktestState,
+    pe: PendingEntry,
     today: date,
     full_cache: dict[str, pd.DataFrame],
     settings: Settings,
 ) -> None:
-    """翌営業日の始値でエントリー判定（ギャップアップなら見送り、株数も計算）。"""
-    pe = state.pending_entry
-    assert pe is not None
-    state.pending_entry = None  # consume
+    """1件の pending_entry を翌営業日始値で約定判定。動的予算 = 残キャッシュ / 残空きスロット数。"""
+    # 念のため重複エントリーガード
+    if pe.ticker in state.held_tickers:
+        return
 
     cache_df = full_cache.get(pe.ticker)
     ohlc = _get_ohlc_for_date(cache_df, today) if cache_df is not None else None
@@ -165,22 +185,27 @@ def _process_pending_entry(
         print(f"  SKIP  {pe.ticker} @ ¥{today_open}: gap-up +{gap_pct:.1f}% > 2%", flush=True)
         return
 
+    # 動的予算: 残キャッシュ / 残空きスロット数
+    open_slots = state.open_slots
+    if open_slots <= 0:
+        return  # 全スロット埋まっている（早期スキップ）
+    slot_budget = (state.cash / open_slots).quantize(Decimal("1"))
+
     # 株数計算（単元株100株単位）
     try:
         shares = compute_quantity(
-            state.cash, pe.reference_close, settings.gap_up_threshold, settings.budget_jpy
+            state.cash, pe.reference_close, settings.gap_up_threshold, slot_budget
         )
     except Exception as e:
         state.insufficient_capital_skipped += 1
         print(f"  SKIP  {pe.ticker} @ ¥{today_open}: {e}", flush=True)
         return
 
-    # ザラ場ですぐ約定すると仮定 → エントリー価格は始値
     entry_price = today_open
     stop = compute_stop_loss_price(entry_price, settings.stop_loss_rate)
     time_stop_date = add_trading_days(today, 5)
 
-    state.position = Position(
+    state.positions.append(Position(
         ticker=pe.ticker,
         shares=shares,
         entry_price=entry_price,
@@ -190,10 +215,10 @@ def _process_pending_entry(
         trailing_stop_price=stop,
         highest_price_since_entry=entry_price,
         time_stop_date=time_stop_date,
-    )
+    ))
     state.cash -= entry_price * shares
     print(
-        f"  ENTRY {pe.ticker} @ ¥{entry_price} ×{shares}  "
+        f"  ENTRY {pe.ticker} @ ¥{entry_price} ×{shares}  budget=¥{int(slot_budget):,}  "
         f"(sig {pe.signal_date}, RSI={pe.rsi14:.1f}, stop=¥{stop})",
         flush=True,
     )
@@ -201,30 +226,27 @@ def _process_pending_entry(
 
 def _process_exit(
     state: BacktestState,
+    pos: Position,
     today: date,
     full_cache: dict[str, pd.DataFrame],
-) -> bool:
-    """保有ポジションのザラ場出口判定。退出したら True を返す。"""
-    pos = state.position
-    assert pos is not None
-
+) -> Position | None:
+    """1 Position の出口判定。退出時は None を返し、継続時は更新後 Position を返す。"""
     cache_df = full_cache.get(pos.ticker)
     if cache_df is None or cache_df.empty:
-        return False
+        return pos  # データなし → 継続扱い
 
     ohlc = _get_ohlc_for_date(cache_df, today)
     if ohlc is None:
-        return False
+        return pos
 
     _today_open, today_high, today_low, today_close = ohlc
 
-    # ザラ場OHLC履歴（指標計算用）
     close_col = "AdjC" if "AdjC" in cache_df.columns else "C"
     high_col  = "AdjH" if "AdjH" in cache_df.columns else "H"
     low_col   = "AdjL" if "AdjL" in cache_df.columns else "L"
     day_data  = cache_df.loc[:str(today)]
     if day_data.empty:
-        return False
+        return pos
 
     exit_dec = evaluate_exit(
         position=pos,
@@ -238,14 +260,13 @@ def _process_exit(
     )
 
     if exit_dec.should_exit:
-        # ザラ場約定 or 終値約定（タイムストップ等）
         exit_price = exit_dec.exit_price if exit_dec.exit_price is not None else today_close
         pnl = (exit_price - pos.entry_price) * pos.shares
         pnl_pct = float((exit_price / pos.entry_price - 1) * 100)
         holding_days = (today - pos.entry_date).days
         state.trades.append(TradeRecord(
             ticker=pos.ticker,
-            signal_date=pos.entry_date,  # 簡略化: 実際はentryの前日
+            signal_date=pos.entry_date,
             entry_date=pos.entry_date,
             exit_date=today,
             entry_price=pos.entry_price,
@@ -257,20 +278,19 @@ def _process_exit(
             reason=exit_dec.reason.value if exit_dec.reason else "unknown",
         ))
         state.cash += exit_price * pos.shares
-        state.position = None
         sign = "+" if pnl >= 0 else ""
         print(
             f"  EXIT  {pos.ticker} @ ¥{exit_price} → {exit_dec.reason.value if exit_dec.reason else '?'}  "
             f"P&L: ¥{sign}{int(pnl):,} ({sign}{pnl_pct:.1f}%)  hold={holding_days}d",
             flush=True,
         )
-        return True
+        return None  # exited
 
-    # ポジション継続: トレーリングストップ＋直近高値を更新
+    # 継続: トレーリングストップ・直近高値更新
     new_highest = max(pos.highest_price_since_entry, today_high)
     if exit_dec.updated_trailing_stop is not None or new_highest > pos.highest_price_since_entry:
         new_trailing = exit_dec.updated_trailing_stop or pos.trailing_stop_price
-        state.position = Position(
+        return Position(
             ticker=pos.ticker,
             shares=pos.shares,
             entry_price=pos.entry_price,
@@ -281,7 +301,7 @@ def _process_exit(
             highest_price_since_entry=new_highest,
             time_stop_date=pos.time_stop_date,
         )
-    return False
+    return pos
 
 
 def _process_signal_scan(
@@ -292,9 +312,13 @@ def _process_signal_scan(
     fund_base: pd.DataFrame,
     bps_map: dict[str, float],
     universe: list[str],
+    open_slots: int,
     verbose: bool = False,
 ) -> None:
-    """終値後にシグナルを検出し、翌営業日のエントリー候補としてキューイング。"""
+    """終値後にシグナルを検出し、翌営業日のエントリー候補（最大 open_slots 件）としてキューイング。"""
+    if open_slots <= 0:
+        return
+
     adj_slice = adj_close_full.loc[:str(today)]
     vol_slice = volume_full.loc[:str(today)]
 
@@ -312,6 +336,11 @@ def _process_signal_scan(
     if filtered.empty:
         return
 
+    # 保有銘柄を候補から除外（重複ポジション防止）
+    filtered = screener.exclude_held_positions(filtered, state.held_tickers)
+    if filtered.empty:
+        return
+
     ohlcv_sig = adj_slice.copy()
     for col in vol_slice.columns:
         ohlcv_sig[f"{col}_vol"] = vol_slice[col]
@@ -320,20 +349,33 @@ def _process_signal_scan(
         filtered["ticker"].tolist(), ohlcv_sig, fund, today
     )
     if verbose:
-        print(f"  [{today}] シグナル候補: {len(candidates)}件")
+        print(f"  [{today}] シグナル候補: {len(candidates)}件  open_slots={open_slots}")
     if not candidates:
         return
 
-    state.signals_found += 1
-    best = ranking.rank(candidates, top_n=1)[0]
+    # 動的予算で買えない高価銘柄を scan 段階で除外（資金不足見送りの削減）
+    # 見積予算 = 残キャッシュ / 残空きスロット数、最悪ケース執行価 ≤ 見積予算 / 100 株 × buffer
+    slot_budget_est = state.cash / max(open_slots, 1)
+    max_buyable = (slot_budget_est / SHARES_PER_UNIT) / (1 + GAP_UP_CANCEL_THRESHOLD)
+    affordable = [c for c in candidates if c.close <= max_buyable]
+    if verbose:
+        print(f"    予算フィルタ後: {len(affordable)}件 (max ¥{int(max_buyable)}/株)")
+    if not affordable:
+        return
 
-    state.pending_entry = PendingEntry(
-        ticker=best.ticker,
-        signal_date=today,
-        reference_close=best.close,
-        rsi14=best.rsi14,
-    )
-    print(f"  SIGNAL {best.ticker} @ ¥{best.close} RSI={best.rsi14:.1f}  (entry next day)", flush=True)
+    state.signals_found += 1
+    top = ranking.rank(affordable, top_n=open_slots)
+    for best in top:
+        state.pending_entries.append(PendingEntry(
+            ticker=best.ticker,
+            signal_date=today,
+            reference_close=best.close,
+            rsi14=best.rsi14,
+        ))
+        print(
+            f"  SIGNAL {best.ticker} @ ¥{best.close} RSI={best.rsi14:.1f}  (entry next day)",
+            flush=True,
+        )
 
 
 def _print_report(
@@ -354,16 +396,17 @@ def _print_report(
     print(f"資金不足見送り    : {state.insufficient_capital_skipped}")
     print(f"取引件数         : {len(state.trades)} 件  ({len(state.trades)/months:.1f} 件/月)")
 
-    if state.position is not None:
-        p = state.position
-        latest = (
-            adj_close_full[p.ticker].dropna().iloc[-1]
-            if p.ticker in adj_close_full.columns else p.entry_price
-        )
-        unrealized = (Decimal(str(round(float(latest), 1))) - p.entry_price) * p.shares
-        sign = "+" if unrealized >= 0 else ""
-        print(f"未決済ポジション : {p.ticker} entry {p.entry_date}  "
-              f"未実現損益 ¥{sign}{int(unrealized):,}")
+    if state.positions:
+        print(f"未決済ポジション : {len(state.positions)}件 / max {state.max_positions}")
+        for p in state.positions:
+            latest = (
+                adj_close_full[p.ticker].dropna().iloc[-1]
+                if p.ticker in adj_close_full.columns else p.entry_price
+            )
+            unrealized = (Decimal(str(round(float(latest), 1))) - p.entry_price) * p.shares
+            sign = "+" if unrealized >= 0 else ""
+            print(f"  {p.ticker} entry {p.entry_date}  "
+                  f"未実現損益 ¥{sign}{int(unrealized):,}")
 
     if not state.trades:
         print("\n→ バックテスト期間中に取引なし")
@@ -634,6 +677,8 @@ def main() -> None:
     parser.add_argument("--rsi-upper", type=float, default=None, help="RSI上限 (例: 50)")
     parser.add_argument("--rsi-lower", type=float, default=None, help="RSI下限 (例: 35)")
     parser.add_argument("--time-stop", type=int, default=None, help="タイムストップ営業日 (例: 5)")
+    parser.add_argument("--max-positions", type=int, default=DEFAULT_MAX_POSITIONS,
+                        help=f"同時保有銘柄数の上限 (default: {DEFAULT_MAX_POSITIONS} = Phase 1)")
     parser.add_argument("--json", action="store_true", help="JSONメトリクスを最終行に出力（grid search用）")
     parser.add_argument("--quiet", action="store_true", help="進捗ログ抑制（grid search用）")
     args = parser.parse_args()
@@ -747,39 +792,55 @@ def main() -> None:
     ])
     if not args.quiet:
         print(f"\nバックテスト期間: {start} 〜 {end}  ({len(trading_days)} 営業日)", flush=True)
-        print(f"初期資本: ¥{args.budget:,}  単元: {SHARES_PER_UNIT}株\n", flush=True)
+        print(f"初期資本: ¥{args.budget:,}  単元: {SHARES_PER_UNIT}株  "
+              f"最大同時保有: {args.max_positions}銘柄\n", flush=True)
 
     state = BacktestState(
         cash=Decimal(str(args.budget)),
         initial_capital=Decimal(str(args.budget)),
+        max_positions=args.max_positions,
     )
     total_days = len(trading_days)
     report_interval = max(1, total_days // 8)
 
-    # quiet モードでは _process_exit / _process_pending_entry / _process_signal_scan の
-    # print 出力を抑制するため stdout を一時的に差し替える
     import contextlib
     import io as _io
 
     def _run_loop():
         for i, today in enumerate(trading_days):
-            if state.position is not None:
-                _process_exit(state, today, full_cache)
-            if state.position is None and state.pending_entry is not None:
-                _process_pending_entry(state, today, full_cache, settings)
-            if state.position is None and state.pending_entry is None:
+            # 1. 全 Position の出口判定（独立評価、退出時は positions から除外）
+            updated: list[Position] = []
+            for pos in state.positions:
+                result = _process_exit(state, pos, today, full_cache)
+                if result is not None:
+                    updated.append(result)
+            state.positions = updated
+
+            # 2. 前日からの pending_entries を順次約定処理（空きスロットの上で）
+            pending_today = state.pending_entries
+            state.pending_entries = []  # 翌日には持ち越さない
+            for pending in pending_today:
+                if state.open_slots <= 0:
+                    break
+                _process_pending_entry(state, pending, today, full_cache, settings)
+
+            # 3. 当日シグナルスキャン（翌営業日エントリー候補、空きスロット数まで）
+            if state.open_slots > 0:
                 _process_signal_scan(
                     state, today,
                     adj_close_full, volume_full,
                     fund_base, bps_map,
                     universe,
+                    open_slots=state.open_slots,
                     verbose=args.verbose,
                 )
+
             if not args.quiet and ((i + 1) % report_interval == 0 or (i + 1) == total_days):
                 pct = (i + 1) / total_days * 100
                 print(
                     f"  [{today}] 進捗 {i+1}/{total_days}日 ({pct:.0f}%)  "
-                    f"取引{len(state.trades)}件  シグナル{state.signals_found}回",
+                    f"取引{len(state.trades)}件  保有{len(state.positions)}件  "
+                    f"シグナル{state.signals_found}回",
                     flush=True,
                 )
 
@@ -800,6 +861,7 @@ def main() -> None:
             "rsi_upper": args.rsi_upper,
             "rsi_lower": args.rsi_lower,
             "time_stop": args.time_stop,
+            "max_positions": args.max_positions,
         }
         print("__METRICS_JSON__" + json.dumps(metrics))
 

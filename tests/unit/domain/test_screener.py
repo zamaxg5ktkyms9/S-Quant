@@ -15,7 +15,11 @@ from squant.config.constants import (
     PRICE_MAX,
     PRICE_MIN,
 )
-from squant.domain.screener import apply_fundamental_filters, exclude_recent_sales
+from squant.domain.screener import (
+    apply_fundamental_filters,
+    exclude_held_positions,
+    exclude_recent_sales,
+)
 
 AS_OF = date(2026, 5, 11)
 
@@ -192,3 +196,39 @@ class TestExcludeRecentSales:
         df = self._make_df(["A.T", "B.T"])
         result = exclude_recent_sales(df, {"A.T", "B.T"})
         assert result.empty
+
+
+# ── exclude_held_positions ────────────────────────────────────────────────────
+
+class TestExcludeHeldPositions:
+    def _make_df(self, tickers: list[str]) -> pd.DataFrame:
+        return pd.DataFrame({"ticker": tickers, "close": [500.0] * len(tickers)})
+
+    def test_removes_held_ticker(self):
+        df = self._make_df(["A.T", "B.T", "C.T"])
+        result = exclude_held_positions(df, {"B.T"})
+        assert set(result["ticker"]) == {"A.T", "C.T"}
+
+    def test_removes_multiple_held(self):
+        df = self._make_df(["A.T", "B.T", "C.T", "D.T"])
+        result = exclude_held_positions(df, {"A.T", "C.T"})
+        assert set(result["ticker"]) == {"B.T", "D.T"}
+
+    def test_keeps_all_when_no_held(self):
+        df = self._make_df(["A.T", "B.T"])
+        result = exclude_held_positions(df, set())
+        assert len(result) == 2
+
+    def test_empty_df_returns_empty(self):
+        result = exclude_held_positions(pd.DataFrame(columns=["ticker"]), {"A.T"})
+        assert result.empty
+
+    def test_held_set_with_no_overlap_keeps_all(self):
+        df = self._make_df(["A.T", "B.T"])
+        result = exclude_held_positions(df, {"X.T", "Y.T"})
+        assert set(result["ticker"]) == {"A.T", "B.T"}
+
+    def test_index_is_reset(self):
+        df = self._make_df(["A.T", "B.T", "C.T"])
+        result = exclude_held_positions(df, {"B.T"})
+        assert list(result.index) == [0, 1]

@@ -42,6 +42,13 @@ CIRCUIT_BREAKER_LOSS_RATE = Decimal("0.30")    # Phase 2/3 は 0.15 に厳格化
 # --- Capital ---
 DEFAULT_BUDGET_JPY = Decimal("100000")
 
+# --- Diversification (B phase, 2026-05-25) ---
+# Phase 1 keeps 2 to preserve a usable universe under ¥100k / 100sh / 2 = ¥500 price cap.
+# Phase 2 / Phase 3 widen to 3 once the per-stock budget can carry a ¥1,000+ price cap.
+MAX_POSITIONS_PHASE_1 = 2
+MAX_POSITIONS_PHASE_2_3 = 3
+DEFAULT_MAX_POSITIONS = MAX_POSITIONS_PHASE_1
+
 # --- Data validation ---
 ANOMALY_PRICE_CHANGE_MAX = 0.30            # ±30% daily move → skip ticker
 VOLUME_SPIKE_MAX_RATIO = 50.0              # > 50× 20-day median → skip
