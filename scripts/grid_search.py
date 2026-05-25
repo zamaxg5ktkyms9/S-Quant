@@ -33,7 +33,11 @@ GRID = {
 }
 
 
-def run_one(params: dict, start: str, end: str) -> dict | None:
+def run_one(
+    params: dict, start: str, end: str,
+    budget: int | None = None, max_positions: int | None = None,
+    timeout: int = 120,
+) -> dict | None:
     """1組合せ実行。stdoutから __METRICS_JSON__ 行を抽出して返す。"""
     cmd = [
         str(PYTHON_BIN), str(BACKTEST_SCRIPT),
@@ -44,11 +48,15 @@ def run_one(params: dict, start: str, end: str) -> dict | None:
         "--time-stop",     str(params["time_stop"]),
         "--quiet", "--json",
     ]
+    if budget is not None:
+        cmd += ["--budget", str(budget)]
+    if max_positions is not None:
+        cmd += ["--max-positions", str(max_positions)]
     try:
         result = subprocess.run(
             cmd,
             capture_output=True, text=True,
-            cwd=REPO_ROOT, timeout=120,
+            cwd=REPO_ROOT, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         return None
