@@ -75,10 +75,11 @@ class ETAInflationAbort(Exception):
 
 
 def _runner(args_tuple):
-    params, start, end, budget, max_positions, timeout = args_tuple
+    params, start, end, budget, max_positions, timeout, signal = args_tuple
     return params, run_one(
         params, start, end,
         budget=budget, max_positions=max_positions, timeout=timeout,
+        signal=signal,
     )
 
 
@@ -89,6 +90,7 @@ def grid_search_period(
     initial_eta_estimate: float | None = None,
     wall_clock_deadline: float | None = None,
     combos_override: list[dict] | None = None,
+    signal: str | None = None,
 ) -> list[dict]:
     """指定期間で grid search を実行し、結果リストを返す。
 
@@ -153,6 +155,7 @@ def grid_search_period(
             metrics = run_one(
                 c, start, end,
                 budget=budget, max_positions=max_positions, timeout=subprocess_timeout,
+                signal=signal,
             )
             completed += 1
             if metrics is not None:
@@ -162,7 +165,7 @@ def grid_search_period(
     else:
         with ProcessPoolExecutor(max_workers=workers) as ex:
             futures = {
-                ex.submit(_runner, (c, start, end, budget, max_positions, subprocess_timeout)): c
+                ex.submit(_runner, (c, start, end, budget, max_positions, subprocess_timeout, signal)): c
                 for c in combos
             }
             try:
@@ -195,6 +198,7 @@ def evaluate_window(
     subprocess_timeout: int = 60,
     initial_eta_estimate: float | None = None,
     wall_clock_deadline: float | None = None,
+    signal: str | None = None,
 ) -> dict | None:
     """1窓を評価して IS/OOS メトリクスと robust 判定を返す。失敗時 None。"""
     print(f"\n{'='*80}")
@@ -207,6 +211,7 @@ def evaluate_window(
         budget=budget, max_positions=max_positions, subprocess_timeout=subprocess_timeout,
         initial_eta_estimate=initial_eta_estimate,
         wall_clock_deadline=wall_clock_deadline,
+        signal=signal,
     )
     if not is_results:
         print(f"  ❌ Window {label}: IS で結果が得られず")
@@ -237,6 +242,7 @@ def evaluate_window(
     oos_metrics = run_one(
         best_params, oos_start, oos_end,
         budget=budget, max_positions=max_positions, timeout=subprocess_timeout,
+        signal=signal,
     )
     if oos_metrics is None:
         print(f"  ❌ Window {label}: OOS バックテスト失敗")
@@ -331,6 +337,8 @@ def main() -> None:
                         help="全体タイムアウト秒（default: 3600 = 1時間）。超過で自動 abort")
     parser.add_argument("--benchmark", action="store_true",
                         help=f"事前ベンチ（{BENCHMARK_COMBOS} combos × 1窓）で ETA を実測してから本実行")
+    parser.add_argument("--signal", choices=["pullback", "ma_cross"], default=None,
+                        help="シグナル種別を全 backtest に渡す（default: backtest.py のデフォルト=pullback）")
     parser.add_argument("--out-label", default="rolling3", help="出力JSONのファイル名ラベル")
     args = parser.parse_args()
 
@@ -351,6 +359,8 @@ def main() -> None:
         print(f"Max positions: {args.max_positions}")
     print(f"subprocess timeout: {args.subprocess_timeout}s")
     print(f"全体タイムアウト: {args.max_wall_clock_seconds}s")
+    if args.signal is not None:
+        print(f"Signal: {args.signal}")
     print(f"ロバスト基準: OOS PF ≥ {ROBUST_PF_THRESHOLD} AND OOS 月リターン ≥ {ROBUST_MONTHLY_PCT_THRESHOLD}%")
     print(f"IS Best 選定: trades ≥ {MIN_TRADES_FOR_IS_BEST} のパラメータからのみ選出")
 
@@ -369,6 +379,7 @@ def main() -> None:
             budget=args.budget, max_positions=args.max_positions,
             subprocess_timeout=args.subprocess_timeout,
             combos_override=bench_combos,
+            signal=args.signal,
         )
         bench_elapsed = time.time() - bench_t0
         per_combo = bench_elapsed / max(BENCHMARK_COMBOS, 1)
@@ -399,6 +410,7 @@ def main() -> None:
                 subprocess_timeout=args.subprocess_timeout,
                 initial_eta_estimate=initial_eta_per_window,
                 wall_clock_deadline=wall_clock_deadline,
+                signal=args.signal,
             )
             if r is None:
                 print(f"⚠ Window {label} スキップ")

@@ -23,6 +23,14 @@ VOLUME_SURGE_MULTIPLIER = 1.2              # 当日出来高 > 20日平均 × 1.
 VOLATILITY_WINDOW = 20                     # 20-day std dev window
 HISTORY_DAYS_REQUIRED = 90                 # need 90 calendar days (~75 trading days) of data
 
+# --- C phase: MA cross signal (candidate B / NotebookLM 改善案1, 2026-05-27) ---
+# 「上がり始めた確認後に買う」トレンドフォロー型。押し目モメンタムの
+# OOS マイナス問題を構造的に解決できるか検証する。
+MA_SHORT = 5                               # 短期MA
+MA_MID = 25                                # 中期MA
+MA_TREND_LOOKBACK = 20                     # 25日MAが「上向き」と判定する遡及期間
+MA_TREND_MIN_SLOPE = 0.0                   # 25日MA(today) > 25日MA(today - LOOKBACK) を要求
+
 # --- Execution ---
 GAP_UP_CANCEL_THRESHOLD = Decimal("0.02")  # cancel if open > prev_close * 1.02
 SLIPPAGE_BUFFER = Decimal("0.02")          # 2% — same as gap-up threshold

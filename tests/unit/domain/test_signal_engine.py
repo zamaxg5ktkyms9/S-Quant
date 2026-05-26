@@ -7,8 +7,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from squant.config.constants import MA_LONG, RSI_BUY_UPPER, VOLUME_SURGE_MULTIPLIER, VOLUME_SURGE_WINDOW
-from squant.domain.signal_engine import detect_signals
+from squant.config.constants import (
+    MA_LONG,
+    MA_MID,
+    MA_TREND_LOOKBACK,
+    RSI_BUY_UPPER,
+    VOLUME_SURGE_MULTIPLIER,
+    VOLUME_SURGE_WINDOW,
+)
+from squant.domain.signal_engine import detect_signals, detect_signals_ma_cross
 
 AS_OF = date(2026, 5, 11)
 N = MA_LONG + 20  # enough days for all indicators
@@ -142,3 +149,95 @@ class TestDetectSignals:
         fund = pd.concat([_make_fund("A.T"), _make_fund("B.T")])
         result = detect_signals(["A.T", "B.T"], ohlcv, fund, AS_OF)
         assert result == []
+
+
+# ── detect_signals_ma_cross (C phase) ──────────────────────────────────────────
+
+# MA cross needs at least MA_MID + MA_TREND_LOOKBACK + 5 days
+N_MA = MA_MID + MA_TREND_LOOKBACK + 10
+
+
+def _steady_uptrend(n: int = N_MA, start: float = 300.0, end: float = 600.0) -> np.ndarray:
+    """安定した上昇トレンド: 5日MA > 25日MA、25日MA 上向きを満たす。"""
+    return np.linspace(start, end, n)
+
+
+def _steady_downtrend(n: int = N_MA, start: float = 600.0, end: float = 300.0) -> np.ndarray:
+    return np.linspace(start, end, n)
+
+
+def _flat(n: int = N_MA, level: float = 500.0) -> np.ndarray:
+    return np.full(n, level)
+
+
+class TestDetectSignalsMaCross:
+    def test_uptrend_passes(self):
+        """5日MA > 25日MA かつ 25日MA 上向き → シグナル発生."""
+        ohlcv = _make_ohlcv("A.T", _steady_uptrend(), vol_surge=True)
+        fund = _make_fund("A.T")
+        result = detect_signals_ma_cross(["A.T"], ohlcv, fund, AS_OF)
+        assert len(result) == 1
+        assert result[0].ticker == "A.T"
+
+    def test_downtrend_fails_cross(self):
+        """下降トレンドでは 5日MA < 25日MA、cond1_cross で除外."""
+        ohlcv = _make_ohlcv("A.T", _steady_downtrend(), vol_surge=True)
+        fund = _make_fund("A.T")
+        result = detect_signals_ma_cross(["A.T"], ohlcv, fund, AS_OF)
+        assert result == []
+
+    def test_flat_price_fails(self):
+        """フラットだと 5日MA ≒ 25日MA、cross 条件で除外。
+
+        厳密に float 同点になる可能性は低いが、25日MA の上昇が無いので
+        cond2_trend でも除外される（>0 を要求）。
+        """
+        ohlcv = _make_ohlcv("A.T", _flat(), vol_surge=True)
+        fund = _make_fund("A.T")
+        result = detect_signals_ma_cross(["A.T"], ohlcv, fund, AS_OF)
+        assert result == []
+
+    def test_no_volume_surge_fails(self):
+        """上昇トレンドでも 出来高サージなければ除外."""
+        ohlcv = _make_ohlcv("A.T", _steady_uptrend(), vol_surge=False)
+        fund = _make_fund("A.T")
+        result = detect_signals_ma_cross(["A.T"], ohlcv, fund, AS_OF)
+        assert result == []
+
+    def test_insufficient_history(self):
+        """データ不足は除外."""
+        prices = _steady_uptrend(MA_MID)  # 25日のみ、lookback 不足
+        ohlcv = _make_ohlcv("A.T", prices, vol_surge=True)
+        fund = _make_fund("A.T")
+        result = detect_signals_ma_cross(["A.T"], ohlcv, fund, AS_OF)
+        assert result == []
+
+    def test_recent_downturn_after_uptrend_fails(self):
+        """直近で 5日MA が 25日MA を下回ったら除外（クロス下抜け）."""
+        n = N_MA
+        up_n = int(n * 0.5)
+        down_n = n - up_n
+        up = np.linspace(300.0, 700.0, up_n)
+        down = np.linspace(700.0, 400.0, down_n)
+        prices = np.concatenate([up, down])
+        ohlcv = _make_ohlcv("A.T", prices, vol_surge=True)
+        fund = _make_fund("A.T")
+        result = detect_signals_ma_cross(["A.T"], ohlcv, fund, AS_OF)
+        assert result == []
+
+    def test_missing_ticker_in_ohlcv(self):
+        ohlcv = pd.DataFrame(index=pd.date_range(end=AS_OF, periods=N_MA, freq="B"))
+        fund = _make_fund("A.T")
+        result = detect_signals_ma_cross(["A.T"], ohlcv, fund, AS_OF)
+        assert result == []
+
+    def test_candidate_fields_populated(self):
+        ohlcv = _make_ohlcv("A.T", _steady_uptrend(), vol_surge=True)
+        fund = _make_fund("A.T", pbr=1.2)
+        result = detect_signals_ma_cross(["A.T"], ohlcv, fund, AS_OF)
+        assert len(result) == 1
+        c = result[0]
+        assert isinstance(c.close, Decimal)
+        assert c.pbr == 1.2
+        assert c.market_cap_jpy > 0
+        assert c.volume_surge_ratio >= float(VOLUME_SURGE_MULTIPLIER)

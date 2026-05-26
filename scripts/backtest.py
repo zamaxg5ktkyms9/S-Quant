@@ -313,6 +313,7 @@ def _process_signal_scan(
     bps_map: dict[str, float],
     universe: list[str],
     open_slots: int,
+    signal_func=None,
     verbose: bool = False,
 ) -> None:
     """終値後にシグナルを検出し、翌営業日のエントリー候補（最大 open_slots 件）としてキューイング。"""
@@ -345,9 +346,8 @@ def _process_signal_scan(
     for col in vol_slice.columns:
         ohlcv_sig[f"{col}_vol"] = vol_slice[col]
 
-    candidates = signal_engine.detect_signals(
-        filtered["ticker"].tolist(), ohlcv_sig, fund, today
-    )
+    detector = signal_func if signal_func is not None else signal_engine.detect_signals
+    candidates = detector(filtered["ticker"].tolist(), ohlcv_sig, fund, today)
     if verbose:
         print(f"  [{today}] シグナル候補: {len(candidates)}件  open_slots={open_slots}")
     if not candidates:
@@ -679,6 +679,8 @@ def main() -> None:
     parser.add_argument("--time-stop", type=int, default=None, help="タイムストップ営業日 (例: 5)")
     parser.add_argument("--max-positions", type=int, default=DEFAULT_MAX_POSITIONS,
                         help=f"同時保有銘柄数の上限 (default: {DEFAULT_MAX_POSITIONS} = Phase 1)")
+    parser.add_argument("--signal", choices=["pullback", "ma_cross"], default="pullback",
+                        help="シグナル種別 (default: pullback = A1/B 戦略、ma_cross = C フェーズ)")
     parser.add_argument("--json", action="store_true", help="JSONメトリクスを最終行に出力（grid search用）")
     parser.add_argument("--quiet", action="store_true", help="進捗ログ抑制（grid search用）")
     args = parser.parse_args()
@@ -793,7 +795,7 @@ def main() -> None:
     if not args.quiet:
         print(f"\nバックテスト期間: {start} 〜 {end}  ({len(trading_days)} 営業日)", flush=True)
         print(f"初期資本: ¥{args.budget:,}  単元: {SHARES_PER_UNIT}株  "
-              f"最大同時保有: {args.max_positions}銘柄\n", flush=True)
+              f"最大同時保有: {args.max_positions}銘柄  シグナル: {args.signal}\n", flush=True)
 
     state = BacktestState(
         cash=Decimal(str(args.budget)),
@@ -802,6 +804,12 @@ def main() -> None:
     )
     total_days = len(trading_days)
     report_interval = max(1, total_days // 8)
+
+    # シグナル関数を解決
+    if args.signal == "ma_cross":
+        signal_func = signal_engine.detect_signals_ma_cross
+    else:
+        signal_func = signal_engine.detect_signals
 
     import contextlib
     import io as _io
@@ -832,6 +840,7 @@ def main() -> None:
                     fund_base, bps_map,
                     universe,
                     open_slots=state.open_slots,
+                    signal_func=signal_func,
                     verbose=args.verbose,
                 )
 
@@ -862,6 +871,7 @@ def main() -> None:
             "rsi_lower": args.rsi_lower,
             "time_stop": args.time_stop,
             "max_positions": args.max_positions,
+            "signal": args.signal,
         }
         print("__METRICS_JSON__" + json.dumps(metrics))
 

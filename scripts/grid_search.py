@@ -36,7 +36,7 @@ GRID = {
 def run_one(
     params: dict, start: str, end: str,
     budget: int | None = None, max_positions: int | None = None,
-    timeout: int = 120,
+    timeout: int = 120, signal: str | None = None,
 ) -> dict | None:
     """1組合せ実行。stdoutから __METRICS_JSON__ 行を抽出して返す。"""
     cmd = [
@@ -52,6 +52,8 @@ def run_one(
         cmd += ["--budget", str(budget)]
     if max_positions is not None:
         cmd += ["--max-positions", str(max_positions)]
+    if signal is not None:
+        cmd += ["--signal", signal]
     try:
         result = subprocess.run(
             cmd,
