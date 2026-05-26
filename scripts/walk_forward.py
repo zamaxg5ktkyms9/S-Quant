@@ -20,6 +20,13 @@ Walk-Forward Analysis — 過剰最適化（in-sample over-fit）の検証
 - 1/3 窓 robust           → ⚠ Marginal（時期次第・要追加検証）
 - 0/3 窓 robust           → ❌ Overfitted / Non-viable（戦略撤退）
 
+恒久対策（2026-05-26 追加・docs/operational_notes.md 参照）:
+- デフォルト workers=1（並列I/O 競合による subprocess timeout 多発を防ぐ）
+- デフォルト subprocess_timeout=60s（速い組合せ用、遅い組合せは早期 N/A）
+- --max-wall-clock-seconds で全体タイムアウト（default 3600s）
+- ETA 自動監視: 10%進捗時点で初期推定の 5倍超なら abort
+- --benchmark フラグで小規模事前実測（10 combos × 1窓）
+
 単窓モード（後方互換）:
     python scripts/walk_forward.py --single --is-start 2024-01-04 --is-end 2024-12-30 \
         --oos-start 2025-01-06 --oos-end 2025-12-30
@@ -49,6 +56,23 @@ ROBUST_PF_THRESHOLD = 1.0
 ROBUST_MONTHLY_PCT_THRESHOLD = 0.1
 MIN_TRADES_FOR_IS_BEST = 5  # IS Grid Search のベスト選定で必要な最小取引数（trades=0 を弾く）
 
+# 恒久対策パラメータ
+ETA_INFLATION_ABORT_RATIO = 5.0   # 10%進捗時点の実 ETA が初期推定の 5倍を超えたら abort
+ETA_INFLATION_WARN_RATIO = 2.0    # 同 2倍超で警告
+ETA_CHECK_PROGRESS_PCT = 10       # ETA 再計算する進捗パーセント
+
+# ベンチマーク用: 全 GRID から先頭 N 組合せだけ実行
+BENCHMARK_COMBOS = 10
+BENCHMARK_WINDOW = ("2024-01-04", "2024-12-30", "2025-01-06", "2025-12-30")
+
+
+class WallClockExceeded(Exception):
+    """全体タイムアウト到達時に raise される。"""
+
+
+class ETAInflationAbort(Exception):
+    """ETA 異常膨張による自動 abort 時に raise される。"""
+
 
 def _runner(args_tuple):
     params, start, end, budget, max_positions, timeout = args_tuple
@@ -61,21 +85,67 @@ def _runner(args_tuple):
 def grid_search_period(
     start: str, end: str, workers: int,
     budget: int | None = None, max_positions: int | None = None,
-    subprocess_timeout: int = 120,
+    subprocess_timeout: int = 60,
+    initial_eta_estimate: float | None = None,
+    wall_clock_deadline: float | None = None,
+    combos_override: list[dict] | None = None,
 ) -> list[dict]:
     """指定期間で grid search を実行し、結果リストを返す。
 
     workers=1 ならシリアル実行（pickle ロード I/O 競合を回避）。
     workers≥2 なら ProcessPoolExecutor で並列実行。
+
+    恒久対策:
+    - wall_clock_deadline（monotonic 時刻）を超えたら WallClockExceeded を raise
+    - 10% 進捗時点で実 ETA を再計算し、initial_eta_estimate の N倍超なら
+      警告 or ETAInflationAbort を raise
     """
     keys = list(GRID.keys())
-    combos = [dict(zip(keys, vs)) for vs in itertools.product(*GRID.values())]
+    combos = combos_override if combos_override is not None else [
+        dict(zip(keys, vs)) for vs in itertools.product(*GRID.values())
+    ]
     total = len(combos)
-    print(f"  Grid search: {total} 組合せ ({start} 〜 {end}, workers={workers})", flush=True)
+    print(f"  Grid search: {total} 組合せ ({start} 〜 {end}, workers={workers}, timeout={subprocess_timeout}s)", flush=True)
+    if initial_eta_estimate is not None:
+        print(f"    初期 ETA 推定: {initial_eta_estimate:.0f}s "
+              f"(警告閾値 {ETA_INFLATION_WARN_RATIO}x, abort 閾値 {ETA_INFLATION_ABORT_RATIO}x)",
+              flush=True)
 
     t0 = time.time()
     results: list[dict] = []
     completed = 0
+    eta_check_threshold = max(1, int(total * ETA_CHECK_PROGRESS_PCT / 100))
+    eta_checked = False
+
+    def _check_health(completed_n: int) -> None:
+        """全体タイムアウトと ETA 膨張をチェック。"""
+        nonlocal eta_checked
+        if wall_clock_deadline is not None and time.monotonic() >= wall_clock_deadline:
+            raise WallClockExceeded(
+                f"全体タイムアウト到達 ({wall_clock_deadline} monotonic)、"
+                f"{completed_n}/{total} 完了時点で中断"
+            )
+        if not eta_checked and completed_n >= eta_check_threshold and initial_eta_estimate:
+            elapsed = time.time() - t0
+            measured_eta = elapsed / completed_n * total
+            ratio = measured_eta / initial_eta_estimate
+            print(f"    [ETA再計算 @{completed_n}/{total}] elapsed={elapsed:.0f}s → "
+                  f"全体予測 {measured_eta:.0f}s ({ratio:.1f}× of {initial_eta_estimate:.0f}s)",
+                  flush=True)
+            if ratio >= ETA_INFLATION_ABORT_RATIO:
+                raise ETAInflationAbort(
+                    f"ETA が初期推定の {ratio:.1f}倍に膨張 — 異常終了。"
+                    f"設定（workers/timeout）を見直してください"
+                )
+            elif ratio >= ETA_INFLATION_WARN_RATIO:
+                print(f"    ⚠ ETA が初期推定の {ratio:.1f}倍 — 継続するが詰まりの可能性", flush=True)
+            eta_checked = True
+
+    def _report_progress(completed_n: int) -> None:
+        if completed_n % 30 == 0 or completed_n == total:
+            elapsed = time.time() - t0
+            eta = elapsed / completed_n * (total - completed_n)
+            print(f"    {completed_n}/{total}  elapsed {elapsed:.0f}s  ETA {eta:.0f}s", flush=True)
 
     if workers <= 1:
         # シリアル実行: pickle I/O 競合と subprocess timeout 多発を回避
@@ -87,26 +157,28 @@ def grid_search_period(
             completed += 1
             if metrics is not None:
                 results.append(metrics)
-            if completed % 30 == 0 or completed == total:
-                elapsed = time.time() - t0
-                eta = elapsed / completed * (total - completed)
-                print(f"    {completed}/{total}  elapsed {elapsed:.0f}s  ETA {eta:.0f}s", flush=True)
+            _check_health(completed)
+            _report_progress(completed)
     else:
         with ProcessPoolExecutor(max_workers=workers) as ex:
             futures = {
                 ex.submit(_runner, (c, start, end, budget, max_positions, subprocess_timeout)): c
                 for c in combos
             }
-            for fut in as_completed(futures):
-                params, metrics = fut.result()
-                completed += 1
-                if metrics is None:
-                    continue
-                results.append(metrics)
-                if completed % 30 == 0 or completed == total:
-                    elapsed = time.time() - t0
-                    eta = elapsed / completed * (total - completed)
-                    print(f"    {completed}/{total}  elapsed {elapsed:.0f}s  ETA {eta:.0f}s", flush=True)
+            try:
+                for fut in as_completed(futures):
+                    params, metrics = fut.result()
+                    completed += 1
+                    if metrics is not None:
+                        results.append(metrics)
+                    _check_health(completed)
+                    _report_progress(completed)
+            except (WallClockExceeded, ETAInflationAbort):
+                # 残り futures を cancel して上位に伝播
+                for f in futures:
+                    f.cancel()
+                ex.shutdown(wait=False, cancel_futures=True)
+                raise
     return results
 
 
@@ -120,7 +192,9 @@ def evaluate_window(
     is_start: str, is_end: str, oos_start: str, oos_end: str,
     workers: int, label: str,
     budget: int | None = None, max_positions: int | None = None,
-    subprocess_timeout: int = 120,
+    subprocess_timeout: int = 60,
+    initial_eta_estimate: float | None = None,
+    wall_clock_deadline: float | None = None,
 ) -> dict | None:
     """1窓を評価して IS/OOS メトリクスと robust 判定を返す。失敗時 None。"""
     print(f"\n{'='*80}")
@@ -131,6 +205,8 @@ def evaluate_window(
     is_results = grid_search_period(
         is_start, is_end, workers,
         budget=budget, max_positions=max_positions, subprocess_timeout=subprocess_timeout,
+        initial_eta_estimate=initial_eta_estimate,
+        wall_clock_deadline=wall_clock_deadline,
     )
     if not is_results:
         print(f"  ❌ Window {label}: IS で結果が得られず")
@@ -243,13 +319,18 @@ def main() -> None:
     parser.add_argument("--is-end",     default="2024-12-30")
     parser.add_argument("--oos-start",  default="2025-01-06")
     parser.add_argument("--oos-end",    default="2025-12-30")
-    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--workers", type=int, default=1,
+                        help="並列度（default: 1 = シリアル）。docs/operational_notes.md 参照")
     parser.add_argument("--budget", type=int, default=None,
                         help="バックテスト予算（円）。指定しなければ backtest.py のデフォルト")
     parser.add_argument("--max-positions", type=int, default=None,
                         help="同時保有銘柄数の上限。指定しなければ backtest.py のデフォルト")
-    parser.add_argument("--subprocess-timeout", type=int, default=120,
-                        help="各 subprocess の timeout 秒（default: 120）")
+    parser.add_argument("--subprocess-timeout", type=int, default=60,
+                        help="各 subprocess の timeout 秒（default: 60）")
+    parser.add_argument("--max-wall-clock-seconds", type=int, default=3600,
+                        help="全体タイムアウト秒（default: 3600 = 1時間）。超過で自動 abort")
+    parser.add_argument("--benchmark", action="store_true",
+                        help=f"事前ベンチ（{BENCHMARK_COMBOS} combos × 1窓）で ETA を実測してから本実行")
     parser.add_argument("--out-label", default="rolling3", help="出力JSONのファイル名ラベル")
     args = parser.parse_args()
 
@@ -269,21 +350,64 @@ def main() -> None:
     if args.max_positions is not None:
         print(f"Max positions: {args.max_positions}")
     print(f"subprocess timeout: {args.subprocess_timeout}s")
+    print(f"全体タイムアウト: {args.max_wall_clock_seconds}s")
     print(f"ロバスト基準: OOS PF ≥ {ROBUST_PF_THRESHOLD} AND OOS 月リターン ≥ {ROBUST_MONTHLY_PCT_THRESHOLD}%")
     print(f"IS Best 選定: trades ≥ {MIN_TRADES_FOR_IS_BEST} のパラメータからのみ選出")
 
-    window_results: list[dict] = []
-    for i, (is_s, is_e, oos_s, oos_e) in enumerate(windows_def, 1):
-        label = f"W{i}"
-        r = evaluate_window(
-            is_s, is_e, oos_s, oos_e, args.workers, label,
+    # ベンチマーク先行（実測 ETA 推定）
+    initial_eta_per_window: float | None = None
+    if args.benchmark:
+        print(f"\n{'='*80}")
+        print(f"[BENCHMARK] {BENCHMARK_COMBOS} combos × 1 window で実測中…")
+        print(f"{'='*80}")
+        keys = list(GRID.keys())
+        all_combos = [dict(zip(keys, vs)) for vs in itertools.product(*GRID.values())]
+        bench_combos = all_combos[:BENCHMARK_COMBOS]
+        bench_t0 = time.time()
+        bench_results = grid_search_period(
+            BENCHMARK_WINDOW[0], BENCHMARK_WINDOW[1], args.workers,
             budget=args.budget, max_positions=args.max_positions,
             subprocess_timeout=args.subprocess_timeout,
+            combos_override=bench_combos,
         )
-        if r is None:
-            print(f"⚠ Window {label} スキップ")
-            continue
-        window_results.append(r)
+        bench_elapsed = time.time() - bench_t0
+        per_combo = bench_elapsed / max(BENCHMARK_COMBOS, 1)
+        total_combos = len(all_combos)
+        per_window = per_combo * total_combos
+        total_estimate = per_window * len(windows_def)
+        print(f"\n[BENCHMARK 結果] {BENCHMARK_COMBOS} combos: {bench_elapsed:.1f}s "
+              f"({per_combo:.2f}s/combo, {len(bench_results)} valid)")
+        print(f"  1窓 ({total_combos} combos) 推定: {per_window:.0f}s "
+              f"({per_window/60:.1f}分)")
+        print(f"  全 {len(windows_def)} 窓推定: {total_estimate:.0f}s "
+              f"({total_estimate/60:.1f}分)")
+        if total_estimate > args.max_wall_clock_seconds:
+            print(f"⚠ 推定 ({total_estimate:.0f}s) > 全体タイムアウト ({args.max_wall_clock_seconds}s)")
+            print(f"  --max-wall-clock-seconds を上げるか、--workers を増やしてください")
+        initial_eta_per_window = per_window
+
+    overall_t0 = time.monotonic()
+    wall_clock_deadline = overall_t0 + args.max_wall_clock_seconds
+
+    window_results: list[dict] = []
+    try:
+        for i, (is_s, is_e, oos_s, oos_e) in enumerate(windows_def, 1):
+            label = f"W{i}"
+            r = evaluate_window(
+                is_s, is_e, oos_s, oos_e, args.workers, label,
+                budget=args.budget, max_positions=args.max_positions,
+                subprocess_timeout=args.subprocess_timeout,
+                initial_eta_estimate=initial_eta_per_window,
+                wall_clock_deadline=wall_clock_deadline,
+            )
+            if r is None:
+                print(f"⚠ Window {label} スキップ")
+                continue
+            window_results.append(r)
+    except WallClockExceeded as e:
+        print(f"\n❌ 全体タイムアウト: {e}", flush=True)
+    except ETAInflationAbort as e:
+        print(f"\n❌ ETA 異常膨張で自動 abort: {e}", flush=True)
 
     if not window_results:
         print("\n全窓で結果が得られませんでした。")
