@@ -92,13 +92,16 @@ def main() -> None:
             return
 
         # log にabortの兆候があれば送って終了
+        # 注: 「全体タイムアウト: 7200s」(設定表示) は誤検知するので含めない。
+        # 「❌ 全体タイムアウト」「❌ ETA 異常膨張」など実際のエラー出力を捕捉する。
         if LOG_FILE.exists():
             log = LOG_FILE.read_text()
             if (
-                "ETAInflationAbort" in log
-                or "WallClockExceeded" in log
+                "❌ ETA 異常膨張" in log
+                or "❌ 全体タイムアウト" in log
                 or "全窓で結果が得られませんでした" in log
-                or "全体タイムアウト" in log
+                or "ETAInflationAbort: " in log  # raise 時のメッセージ
+                or "WallClockExceeded: " in log
             ):
                 notifier.send(_format_abort_msg(log))
                 print("Sent abort notice to Slack", flush=True)
