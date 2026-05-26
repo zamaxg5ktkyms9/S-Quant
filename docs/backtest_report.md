@@ -430,6 +430,67 @@ W2 IS Grid Search で `grid_search.py` の `subprocess.run(timeout=120)` に多�
   - 分散効果で DD が縮小するか（-16.8% → -10% 台への改善が目標）
   - それでも届かない場合はシグナル本質見直し（候補B: 5×25日 MA クロス）に進む
 
+### 8.9 B-WF — 部分実行結果と恒久対策の動作確認（2026-05-26〜27）
+
+#### 実装内容
+
+- `backtest.py` を複数 Position 対応に改修（`BacktestState.positions: list`、動的予算、同日複数エントリー、保有銘柄重複排除、各 Position 独立出口）
+- `screener.exclude_held_positions` 追加
+- `constants.MAX_POSITIONS_PHASE_1=2 / PHASE_2_3=3` 追加
+- 既存 170 テスト＋screener 新 6 テスト = 176 PASS 維持
+
+#### Phase 1 ¥100k 制約の再評価と予算修正
+
+設計通り `¥100,000 / 2銘柄 / 100株 = ¥333/株上限` ではユニバースが激減し、スモークテストで 1年取引数が 10件（A1 単一銘柄の 23 件から半減）。Grid Search の 180 パターン中ほとんどが trades=0 となり、評価不能に。
+→ **Phase 1 予算を ¥200,000 に増額** することで、A1 と同じ ¥100-¥1,000 価格帯を維持しつつ 2銘柄分散を実現する設計変更。
+
+#### B-WF 1回目（workers=4、abort）
+
+`workers=4` で起動したが A1 と同じ症状（pickle I/O 競合による subprocess timeout 多発）が再発し、9時間で 30% しか完了せず中断。
+
+ただし W1 部分結果は得られた：
+
+| Window | IS Period | OOS Period | IS Monthly | OOS Monthly | OOS PF | OOS DD | Robust |
+|---|---|---|---|---|---|---|---|
+| B W1 | 2022 | 2023 | +1.51% | -0.66% | 0.61 | -8.9% | ❌ |
+
+#### B-WF 2回目（恒久対策後、ETA 自動 abort で正常停止）
+
+恒久対策（`docs/operational_notes.md`、`walk_forward.py` の workers=1 / timeout=60s デフォルト化、`--benchmark`、`--max-wall-clock-seconds`、ETA 自動 abort）導入後に再実行。
+
+- ベンチ: 10 combos × 2024年 = 84秒（8.4s/combo）、推定 1窓 25分、3窓 76分
+- 本実行 W1 IS (2022): 18/180 で 56分経過 → ETA が初期推定の **22.2倍** に膨張
+- `ETAInflationAbort` 発動で **56分で正常停止**（対策前なら 9時間放置になっていた）
+
+期間ごとの subprocess 実行時間に大きな差があり（2024年=8s/combo、2022年=187s/combo）、シリアル実行でも本実行は完走困難。**Phase 1 ¥200k 2銘柄分散の完全 3窓検証には backtest.py のライブラリ化（subprocess を廃して in-process 化）が必要**と判明。
+
+#### A1 vs B W1 比較（OOS 2023）
+
+| Metric | A1 W1 単一銘柄 | B W1 2銘柄分散 ¥200k | 評価 |
+|---|---|---|---|
+| OOS Trades | 21 | **33** | 分散効果あり (+57%) |
+| OOS Monthly | -1.27% | **-0.66%** | 改善（依然マイナス） |
+| OOS PF | 0.43 | **0.61** | 改善（依然 <1.0） |
+| OOS Max DD | -15.1% | **-8.9%** | 約半減 |
+| Robust | ❌ | ❌ | 両者 FAIL |
+
+#### 結論
+
+- **分散効果は定量的に確認**: trades +57%、DD 半減、PF 0.43→0.61
+- **ただし OOS 月リターンはマイナスのまま**: PF 0.61 / monthly -0.66% で robust 基準未達
+- **押し目モメンタムは構造的に限界**: 単一銘柄でも 2銘柄分散でも、シグナル選定ロジック（RSI 35-60 押し目）自体が 2022-2023 のレジームでは負けている
+- **恒久対策は機能**: ETA 自動 abort により対策前の 9時間放置が 56分で打ち切られた（コミット `2e64e00`）
+
+#### 次フェーズ
+
+- **C フェーズ**: シグナル本質見直し（NotebookLM 改善案1・候補B = 5×25日 MA クロス、トレンドフォロー）
+- B-WF 完走は `backtest.py` のライブラリ化（subprocess を廃して in-process 化）と合わせて将来検討
+
+#### 結果ファイル
+
+- `docs/backtests/walkforward_rolling3_B_2stocks.json`（1回目部分、W1 のみ）
+- B-WF v2 は abort のため JSON 出力なし（ログのみ）
+
 ---
 
 ## 9. Strategy Iteration Log
@@ -441,6 +502,7 @@ W2 IS Grid Search で `grid_search.py` の `subprocess.run(timeout=120)` に多�
 | 2026-05-23 | Breakout Follow (20-day high break) | -16.9% | 0.72 | 33.3% | ❌ ダマシ多発、不採用 |
 | 2026-05-24 | Walk-Forward 単窓 IS=2024/OOS=2025 | IS-0.06% OOS-0.21% | OOS 0.77 | OOS 46.7% | ❌ Overfitted 検出 |
 | 2026-05-25 | Walk-Forward W1 IS=2022/OOS=2023 (拡張試行) | IS+9.5% OOS-12.7% | OOS 0.43 | OOS 23.8% | ❌ 2/2 窓連続 FAIL → **単一銘柄戦略撤退、3銘柄分散へ** |
+| 2026-05-27 | B-WF v2 W1 IS=2022/OOS=2023 (2銘柄分散 ¥200k) | IS+1.51% OOS-0.66% | OOS 0.61 | OOS 改善 | ❌ 分散で改善（PF 0.43→0.61, DD -15→-8.9%）も robust 未達 → **シグナル本質見直し（C フェーズ）へ** |
 
 ### Rejected Strategy: Breakout Follow
 
