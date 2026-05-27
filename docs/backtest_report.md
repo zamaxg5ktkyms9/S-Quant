@@ -491,6 +491,92 @@ W2 IS Grid Search で `grid_search.py` の `subprocess.run(timeout=120)` に多�
 - `docs/backtests/walkforward_rolling3_B_2stocks.json`（1回目部分、W1 のみ）
 - B-WF v2 は abort のため JSON 出力なし（ログのみ）
 
+### 8.10 C フェーズ — シグナル本質見直し (5×25日 MA クロス) と C-WF (2026-05-27)
+
+#### 動機
+
+A1 (単一銘柄) と B (2銘柄分散) の両方で OOS マイナスが確定 → **シグナル選定ロジック自体に構造的問題** という結論。NotebookLM 改善案1 = 「下がってる中で買う」（押し目モメンタム）から「上がり始めた確認後に買う」（トレンドフォロー）への転換。
+
+#### シグナル定義 (C-3: クロス + トレンドフィルタ)
+
+| 条件 | 内容 | 押し目モメンタムからの差分 |
+|---|---|---|
+| ① 5日MA > 25日MA | 短期が中期を上回る（上昇基調確認） | 75日MA超の条件を 25日MA上向きに置換 |
+| ② 25日MA(today) > 25日MA(today - 20) | 中期トレンド上向き | 新規（ノイズ除去） |
+| ③ 当日出来高 > 20日平均 × 1.2 | 実需確認 | 維持（ダマシ追従抑制） |
+| 旧 RSI 押し目ゾーン (35-60) | — | **撤廃**（「下がってる中で買う」削除） |
+| 旧 ボラ収縮 | — | **撤廃**（上昇トレンド中はボラ拡大あり） |
+
+#### 実装内容
+
+- `constants.py`: `MA_SHORT=5`, `MA_MID=25`, `MA_TREND_LOOKBACK=20`, `MA_TREND_MIN_SLOPE=0.0`
+- `signal_engine.detect_signals_ma_cross` 新規追加（既存 `detect_signals` は維持、切替可能）
+- `backtest.py` に `--signal {pullback, ma_cross}` フラグ
+- `grid_search.py` / `walk_forward.py` に `--signal` 引数を伝播
+- テスト 8件 追加、**全 184 件 PASS** 維持
+
+#### スモークテスト (2024 単独 IS)
+
+| Metric | A1 2024 | B 2024 ¥200k | **C 2024 MA クロス ¥200k** |
+|---|---|---|---|
+| Trades | 23 | 31 | **55** |
+| Win Rate | 30% | 32% | **38.2%** |
+| Monthly P&L | -1% | -0.72% | **+0.87%** ✅ |
+| Profit Factor | 0.60 | 0.58 | **1.33** ✅ |
+| Cumulative | -12% | -8.6% | **+10.4%** ✅ |
+| Max DD | -16.8% | -11.9% | -10.8% |
+
+→ IS 単独では全指標で改善。OOS で同じ動きをするかは C-WF で検証。
+
+#### C-WF 単窓 結果 (IS=2022 / OOS=2023)
+
+```bash
+python scripts/walk_forward.py --single --signal ma_cross --workers 1 \
+  --budget 200000 --max-positions 2 \
+  --is-start 2022-01-04 --is-end 2022-12-30 \
+  --oos-start 2023-01-04 --oos-end 2023-12-29
+```
+
+| Metric | IS (2022) | OOS (2023) |
+|---|---|---|
+| Best Params | TP=0.05, ATR=2.5, RSI≤45 (unused), TS=5 | (固定) |
+| Trades | 68 | **74** |
+| Win Rate | 36.8% | 40.5% |
+| Monthly P&L | +0.40% | **-0.54%** |
+| Profit Factor | 1.12 | **0.85** |
+| Max DD | -14.3% | -12.5% |
+| Sharpe | -0.14 | -0.21 |
+
+**Robust 判定: ❌ FAIL**（PF 0.85 < 1.0、monthly -0.54% < +0.1%）
+
+#### 三戦略比較 (OOS=2023 で公正比較)
+
+| 戦略 | OOS Trades | OOS Monthly | OOS PF | OOS Max DD | Robust |
+|---|---|---|---|---|---|
+| A1 単一銘柄 (押し目) | 21 | -1.27% | 0.43 | -15.1% | ❌ |
+| B 2銘柄分散 (押し目, ¥200k) | 33 | -0.66% | 0.61 | -8.9% | ❌ |
+| **C 2銘柄分散 (MA クロス, ¥200k)** | **74** | **-0.54%** | **0.85** | -12.5% | ❌ |
+
+**改善のトレンドは明確** (PF 0.43 → 0.61 → 0.85)、しかし PF=1.0 / monthly +0.1% の robust 基準には **依然未達**。
+
+#### 含意
+
+- **シグナル本質見直しは効果あり**: PF が 0.43 → 0.85 まで改善（OOS=2023）。1年限定の IS=2024 では PF 1.33 / monthly +0.87% と robust 基準達成も観察
+- **しかし IS=2022 → OOS=2023 では PF 1.12 → 0.85 と低下**: 過剰最適化の兆候は残る
+- **完全な robust 確認には至らず**: 3窓 WF（IS=2022/OOS=2023、IS=2023/OOS=2024、IS=2024/OOS=2025）の完走と過半数窓 OOS robust が必要
+- **backtest.py の subprocess 経由実行は依然ボトルネック**: workers=1 シリアルでも 9時間半かかった（180 combos × 平均約3分）。完全 WF にはライブラリ化が必要
+
+#### 次ステップ候補
+
+1. **C-2 / C-1 等の別シグナル仕様**で再検証（クロス継続 N 日以内、純粋ゴールデンクロスなど）
+2. **3窓 WF の完走**: `backtest.py` のライブラリ化（subprocess → in-process）を実装後、C-WF を 3窓で完走
+3. **IS=2024/OOS=2025 窓**でも C を単発検証（2024 スモークが良好なので別 OOS でも見たい）
+4. **撤退判断**: 改善トレンドが限界に近いなら、Phase 1 paper trading は当面諦めて貯金フェーズへ
+
+#### 結果ファイル
+
+- `docs/backtests/walkforward_single_C_W1.json`
+
 ---
 
 ## 9. Strategy Iteration Log
@@ -503,6 +589,7 @@ W2 IS Grid Search で `grid_search.py` の `subprocess.run(timeout=120)` に多�
 | 2026-05-24 | Walk-Forward 単窓 IS=2024/OOS=2025 | IS-0.06% OOS-0.21% | OOS 0.77 | OOS 46.7% | ❌ Overfitted 検出 |
 | 2026-05-25 | Walk-Forward W1 IS=2022/OOS=2023 (拡張試行) | IS+9.5% OOS-12.7% | OOS 0.43 | OOS 23.8% | ❌ 2/2 窓連続 FAIL → **単一銘柄戦略撤退、3銘柄分散へ** |
 | 2026-05-27 | B-WF v2 W1 IS=2022/OOS=2023 (2銘柄分散 ¥200k) | IS+1.51% OOS-0.66% | OOS 0.61 | OOS 改善 | ❌ 分散で改善（PF 0.43→0.61, DD -15→-8.9%）も robust 未達 → **シグナル本質見直し（C フェーズ）へ** |
+| 2026-05-27 | C-WF W1 IS=2022/OOS=2023 (MA クロス + 2銘柄分散 ¥200k) | IS+0.40% OOS-0.54% | IS 1.12 / OOS 0.85 | OOS 40.5% | ❌ PF 0.43→0.61→0.85 と改善トレンド明確、しかし robust 未達。IS=2024 スモークは PF 1.33 と robust 達成 → **C-2/C-1 別仕様検証 or ライブラリ化して3窓 WF 完走** |
 
 ### Rejected Strategy: Breakout Follow
 

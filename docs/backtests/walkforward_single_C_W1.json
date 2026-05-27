@@ -1,0 +1,123 @@
+{
+  "mode": "single",
+  "robust_criteria": {
+    "profit_factor_min": 1.0,
+    "monthly_pnl_pct_min": 0.1
+  },
+  "windows": [
+    {
+      "label": "W1",
+      "in_sample": {
+        "period": "2022-01-04〜2022-12-30",
+        "best_params": {
+          "target_profit": 0.05,
+          "atr_mult": 2.5,
+          "rsi_upper": 45.0,
+          "rsi_lower": null,
+          "time_stop": 5,
+          "max_positions": 2,
+          "signal": "ma_cross"
+        },
+        "metrics": {
+          "trades": 68,
+          "signals": 70,
+          "gap_up_skipped": 8,
+          "insufficient_skipped": 0,
+          "trades_per_month": 5.742222222222222,
+          "trades_per_year": 68.99166666666667,
+          "avg_holding_days": 3.514705882352941,
+          "total_pnl": 9495.0,
+          "total_return_pct": 4.7475000000000005,
+          "monthly_pnl": 801.8,
+          "monthly_pnl_pct": 0.40090000000000003,
+          "cagr_pct": 4.818376386774426,
+          "final_equity": 209495.0,
+          "win_rate": 0.36764705882352944,
+          "expectancy": 139.63235294117646,
+          "expectancy_pct": -0.05287136683952692,
+          "avg_win": 3675.4,
+          "avg_loss": -2009.5121951219512,
+          "win_loss_ratio": 1.8290010923655784,
+          "best_trade": 7700.0,
+          "worst_trade": -4035.0,
+          "max_consecutive_wins": 4,
+          "max_consecutive_losses": 8,
+          "max_dd": -28508.75,
+          "max_dd_pct": -14.254375,
+          "max_dd_duration_trades": 27,
+          "sharpe_ratio": -0.14190932799432204,
+          "sortino_ratio": -0.23309224165770323,
+          "calmar_ratio": 0.3380278957705565,
+          "profit_factor": 1.1152445685155965,
+          "by_reason": {
+            "TIME_STOP": 14,
+            "TAKE_PROFIT": 14,
+            "TRAILING_STOP": 2,
+            "STOP_LOSS": 38
+          },
+          "params": {
+            "target_profit": 0.05,
+            "atr_mult": 2.5,
+            "rsi_upper": 45.0,
+            "rsi_lower": null,
+            "time_stop": 5,
+            "max_positions": 2,
+            "signal": "ma_cross"
+          }
+        }
+      },
+      "out_of_sample": {
+        "period": "2023-01-04〜2023-12-29",
+        "metrics": {
+          "trades": 74,
+          "signals": 78,
+          "gap_up_skipped": 11,
+          "insufficient_skipped": 0,
+          "trades_per_month": 6.266295264623955,
+          "trades_per_year": 75.2883008356546,
+          "avg_holding_days": 3.9594594594594597,
+          "total_pnl": -12676.75,
+          "total_return_pct": -6.338375,
+          "monthly_pnl": -1073.4629526462395,
+          "monthly_pnl_pct": -0.5367314763231198,
+          "cagr_pct": -6.445088467058047,
+          "final_equity": 187323.25,
+          "win_rate": 0.40540540540540543,
+          "expectancy": -171.30743243243242,
+          "expectancy_pct": -0.07675832095170759,
+          "avg_win": 2400.5,
+          "avg_loss": -1924.8125,
+          "win_loss_ratio": 1.247134461148813,
+          "best_trade": 5025.0,
+          "worst_trade": -2895.0,
+          "max_consecutive_wins": 3,
+          "max_consecutive_losses": 9,
+          "max_dd": -25056.75,
+          "max_dd_pct": -12.528375,
+          "max_dd_duration_trades": 67,
+          "sharpe_ratio": -0.2079467743418389,
+          "sortino_ratio": -0.35729827034020356,
+          "calmar_ratio": -0.5144393001532958,
+          "profit_factor": 0.8503189507832817,
+          "by_reason": {
+            "TIME_STOP": 16,
+            "STOP_LOSS": 39,
+            "TAKE_PROFIT": 16,
+            "TRAILING_STOP": 3
+          },
+          "params": {
+            "target_profit": 0.05,
+            "atr_mult": 2.5,
+            "rsi_upper": 45.0,
+            "rsi_lower": null,
+            "time_stop": 5,
+            "max_positions": 2,
+            "signal": "ma_cross"
+          }
+        }
+      },
+      "robust": false
+    }
+  ],
+  "verdict": "❌ Overfitted / Non-viable (0/1 窓で基準未達) — 戦略撤退検討"
+}
