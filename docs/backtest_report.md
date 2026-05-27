@@ -559,23 +559,64 @@ python scripts/walk_forward.py --single --signal ma_cross --workers 1 \
 
 **改善のトレンドは明確** (PF 0.43 → 0.61 → 0.85)、しかし PF=1.0 / monthly +0.1% の robust 基準には **依然未達**。
 
-#### 含意
+#### C-WF 2走目: IS=2024 / OOS=2025（2026-05-27 夜）
 
-- **シグナル本質見直しは効果あり**: PF が 0.43 → 0.85 まで改善（OOS=2023）。1年限定の IS=2024 では PF 1.33 / monthly +0.87% と robust 基準達成も観察
-- **しかし IS=2022 → OOS=2023 では PF 1.12 → 0.85 と低下**: 過剰最適化の兆候は残る
-- **完全な robust 確認には至らず**: 3窓 WF（IS=2022/OOS=2023、IS=2023/OOS=2024、IS=2024/OOS=2025）の完走と過半数窓 OOS robust が必要
-- **backtest.py の subprocess 経由実行は依然ボトルネック**: workers=1 シリアルでも 9時間半かかった（180 combos × 平均約3分）。完全 WF にはライブラリ化が必要
+W1 (2022/2023) で robust 未達だったが、2024 単独スモークは PF 1.33 と良好だったため、別 OOS 期間で検証。
+
+```bash
+python scripts/walk_forward.py --single --signal ma_cross --workers 1 \
+  --budget 200000 --max-positions 2 \
+  --is-start 2024-01-04 --is-end 2024-12-30 \
+  --oos-start 2025-01-06 --oos-end 2025-12-30
+```
+
+| Metric | IS (2024) | OOS (2025) |
+|---|---|---|
+| Best Params | TP=0.06, ATR=2.0, RSI≤45 (unused), TS=3 | (固定) |
+| Trades | 58 | 61 |
+| Win Rate | — | — |
+| Monthly P&L | +1.69% | **+0.84%** ✅ |
+| Profit Factor | 1.63 | **1.36** ✅ |
+| Max DD | -8.3% | **-7.4%** |
+| Sharpe | — | — |
+
+**Robust 判定: ✅ PASS**（PF 1.36 ≥ 1.0、monthly +0.84% ≥ +0.1%）
+
+実行時間: 約37分（2022 期間 9.5時間 vs 2024 期間 37分の差。`backtest.py` の subprocess あたり所要時間が期間に依存する未解決のボトルネック）。
+
+#### C 二窓統合: 時期で結果が割れる
+
+| Window | IS Period | OOS Period | OOS Trades | OOS Monthly | OOS PF | OOS DD | Robust |
+|---|---|---|---|---|---|---|---|
+| C-W1 | 2022 | 2023 | 74 | -0.54% | 0.85 | -12.5% | ❌ |
+| **C-W3** | **2024** | **2025** | **61** | **+0.84%** | **1.36** | **-7.4%** | **✅** |
+
+2/2 窓中 1窓 robust = **50%**。最終的な「2窓中過半数」判定は `walk_forward.py` のロジック上 ⚠ Marginal 相当（n=2 threshold=1）。残る W2 (IS=2023/OOS=2024) を完走させて 3窓体制にすれば、`過半数 = 2/3 で ✅` 判定にできる。
+
+IS ベストパラメータの差:
+- W1 IS=2022 ベスト: TP=0.05, ATR=2.5, TS=5
+- W3 IS=2024 ベスト: TP=0.06, ATR=2.0, TS=3
+
+近接しているが完全一致ではない → 完全な構造的優位性ではなく、レジームに対する適合度の差が残る。それでも A1/B 押し目戦略が両 OOS でマイナスだったのに対し、C は片方で robust 達成、もう片方も PF 0.85 まで近づく。
+
+#### 含意（W1+W3 統合）
+
+- **シグナル本質見直しは大きな効果あり**: A1/B では両 OOS で負けていたが、C は **OOS=2025 で初の robust ✅ 達成**
+- **時期依存性が残る**: OOS=2023 (-0.54%/0.85) と OOS=2025 (+0.84%/1.36) で結果が大きく違う
+- **W2 (IS=2023/OOS=2024) を回せば 3窓体制**で「2/3 robust なら採用」の判定材料になる
+- **backtest.py の subprocess 経由実行は依然ボトルネック**: 2022年期間が遅く、3窓完走には実装側の高速化（ライブラリ化）が望ましい
 
 #### 次ステップ候補
 
-1. **C-2 / C-1 等の別シグナル仕様**で再検証（クロス継続 N 日以内、純粋ゴールデンクロスなど）
-2. **3窓 WF の完走**: `backtest.py` のライブラリ化（subprocess → in-process）を実装後、C-WF を 3窓で完走
-3. **IS=2024/OOS=2025 窓**でも C を単発検証（2024 スモークが良好なので別 OOS でも見たい）
-4. **撤退判断**: 改善トレンドが限界に近いなら、Phase 1 paper trading は当面諦めて貯金フェーズへ
+1. **W2 (IS=2023/OOS=2024) を単発検証** → 3窓体制で過半数 robust 判定可能（最短）
+2. **`backtest.py` のライブラリ化** → 3窓 C-WF を一気に完走、grid_search が in-process で 20倍高速化見込み
+3. **C-2 / C-1 等の別シグナル仕様**で再検証
+4. **W3 結果を踏まえて Phase 1 paper trading 再開判断**（OOS=2025 で robust 達成は強い前向き材料）
 
 #### 結果ファイル
 
-- `docs/backtests/walkforward_single_C_W1.json`
+- `docs/backtests/walkforward_single_C_W1.json` (IS=2022/OOS=2023)
+- `docs/backtests/walkforward_single_C_W3.json` (IS=2024/OOS=2025)
 
 ---
 
@@ -590,6 +631,7 @@ python scripts/walk_forward.py --single --signal ma_cross --workers 1 \
 | 2026-05-25 | Walk-Forward W1 IS=2022/OOS=2023 (拡張試行) | IS+9.5% OOS-12.7% | OOS 0.43 | OOS 23.8% | ❌ 2/2 窓連続 FAIL → **単一銘柄戦略撤退、3銘柄分散へ** |
 | 2026-05-27 | B-WF v2 W1 IS=2022/OOS=2023 (2銘柄分散 ¥200k) | IS+1.51% OOS-0.66% | OOS 0.61 | OOS 改善 | ❌ 分散で改善（PF 0.43→0.61, DD -15→-8.9%）も robust 未達 → **シグナル本質見直し（C フェーズ）へ** |
 | 2026-05-27 | C-WF W1 IS=2022/OOS=2023 (MA クロス + 2銘柄分散 ¥200k) | IS+0.40% OOS-0.54% | IS 1.12 / OOS 0.85 | OOS 40.5% | ❌ PF 0.43→0.61→0.85 と改善トレンド明確、しかし robust 未達。IS=2024 スモークは PF 1.33 と robust 達成 → **C-2/C-1 別仕様検証 or ライブラリ化して3窓 WF 完走** |
+| 2026-05-27 夜 | C-WF W3 IS=2024/OOS=2025 (MA クロス + 2銘柄分散 ¥200k) | IS+1.69% OOS+0.84% | IS 1.63 / OOS 1.36 | OOS PASS | ✅ **初の Robust ✅ 達成**（OOS PF 1.36, monthly +0.84%, DD -7.4%）。ただし C-W1 (2023) は ❌ → 時期依存。W2(2023/2024) を埋めて 3窓体制で過半数 robust 判定へ |
 
 ### Rejected Strategy: Breakout Follow
 
