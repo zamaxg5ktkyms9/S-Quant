@@ -24,8 +24,8 @@ from squant.infrastructure.slack_notifier import SlackNotifier
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RESULT_FILE = REPO_ROOT / "docs" / "backtests" / "walkforward_single_C_W1.json"
 LOG_FILE = Path("/tmp/squant_cwf.log")
-MAX_WAIT_SECONDS = 8000  # WF max-wall-clock 7200s + 余裕
-POLL_INTERVAL = 30
+MAX_WAIT_SECONDS = 43200  # 12時間（WF が long-tail のとき用、自動 abort は WF 側で）
+POLL_INTERVAL = 60
 
 
 def _format_msg(report: dict) -> str:
