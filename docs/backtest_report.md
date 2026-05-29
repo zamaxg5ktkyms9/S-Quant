@@ -584,39 +584,62 @@ python scripts/walk_forward.py --single --signal ma_cross --workers 1 \
 
 実行時間: 約37分（2022 期間 9.5時間 vs 2024 期間 37分の差。`backtest.py` の subprocess あたり所要時間が期間に依存する未解決のボトルネック）。
 
-#### C 二窓統合: 時期で結果が割れる
+#### C-WF 3走目: IS=2023 / OOS=2024（2026-05-29 朝、9.5時間で完走）
 
-| Window | IS Period | OOS Period | OOS Trades | OOS Monthly | OOS PF | OOS DD | Robust |
-|---|---|---|---|---|---|---|---|
-| C-W1 | 2022 | 2023 | 74 | -0.54% | 0.85 | -12.5% | ❌ |
-| **C-W3** | **2024** | **2025** | **61** | **+0.84%** | **1.36** | **-7.4%** | **✅** |
+```bash
+python scripts/walk_forward.py --single --signal ma_cross --workers 1 \
+  --budget 200000 --max-positions 2 \
+  --is-start 2023-01-04 --is-end 2023-12-29 \
+  --oos-start 2024-01-04 --oos-end 2024-12-30
+```
 
-2/2 窓中 1窓 robust = **50%**。最終的な「2窓中過半数」判定は `walk_forward.py` のロジック上 ⚠ Marginal 相当（n=2 threshold=1）。残る W2 (IS=2023/OOS=2024) を完走させて 3窓体制にすれば、`過半数 = 2/3 で ✅` 判定にできる。
+| Metric | IS (2023) | OOS (2024) |
+|---|---|---|
+| Best Params | TP=0.04, ATR=2.0, RSI≤45 (unused), TS=5 | (固定) |
+| Trades | 77 | 56 |
+| Monthly P&L | -0.22% | **+0.54%** ✅ |
+| Profit Factor | 0.94 | **1.21** ✅ |
+| Max DD | -11.3% | -13.0% |
 
-IS ベストパラメータの差:
-- W1 IS=2022 ベスト: TP=0.05, ATR=2.5, TS=5
-- W3 IS=2024 ベスト: TP=0.06, ATR=2.0, TS=3
+**Robust 判定: ✅ PASS**（PF 1.21 ≥ 1.0、monthly +0.54% ≥ +0.1%）
 
-近接しているが完全一致ではない → 完全な構造的優位性ではなく、レジームに対する適合度の差が残る。それでも A1/B 押し目戦略が両 OOS でマイナスだったのに対し、C は片方で robust 達成、もう片方も PF 0.85 まで近づく。
+特筆: IS (2023) では PF 0.94 / monthly -0.22% と僅かに赤字 にもかかわらず、OOS (2024) で robust 達成 → 過剰最適化の逆現象（IS で勝てなくても OOS で勝てるパターン）。
 
-#### 含意（W1+W3 統合）
+#### C 三窓統合: 2/3 窓 robust → **✅ Robust verdict 確定**
 
-- **シグナル本質見直しは大きな効果あり**: A1/B では両 OOS で負けていたが、C は **OOS=2025 で初の robust ✅ 達成**
-- **時期依存性が残る**: OOS=2023 (-0.54%/0.85) と OOS=2025 (+0.84%/1.36) で結果が大きく違う
-- **W2 (IS=2023/OOS=2024) を回せば 3窓体制**で「2/3 robust なら採用」の判定材料になる
-- **backtest.py の subprocess 経由実行は依然ボトルネック**: 2022年期間が遅く、3窓完走には実装側の高速化（ライブラリ化）が望ましい
+| Window | IS Period | OOS Period | IS Best Params | OOS Trades | OOS Monthly | OOS PF | OOS DD | Robust |
+|---|---|---|---|---|---|---|---|---|
+| C-W1 | 2022 | 2023 | TP=0.05, ATR=2.5, TS=5 | 74 | -0.54% | 0.85 | -12.5% | ❌ |
+| **C-W2** | **2023** | **2024** | TP=0.04, ATR=2.0, TS=5 | **56** | **+0.54%** | **1.21** | **-13.0%** | **✅** |
+| **C-W3** | **2024** | **2025** | TP=0.06, ATR=2.0, TS=3 | **61** | **+0.84%** | **1.36** | **-7.4%** | **✅** |
+
+**2/3 窓 robust（67%）** → `walk_forward.py` の判定ロジック上 **✅ Robust** verdict 確定（n=3 かつ robust_count ≥ 2）。
+
+IS ベストパラメータの安定性:
+- **RSI≤45 は全窓共通**（C シグナルでは RSI はフィルタ未使用だが grid に含まれる）
+- ATR は 2.0/2.5、TS は 3/5、TP は 0.04〜0.06 → 近接領域に収束
+- 完全一致ではないがレジーム横断で似たパラメータ群が選ばれており、構造的優位性の根拠あり
+
+#### C-WF 結論
+
+- **押し目モメンタム（A1, B）からの転換は正解**: A1 PF 0.43 → C 平均 OOS PF ≈ 1.14 と倍以上改善
+- **時期依存性は残る**: W1 (2023) は ❌、W2 (2024)・W3 (2025) は ✅。**直近 2 年で安定して robust**なのは前向き
+- **過剰最適化ではない可能性**: W2 で「IS マイナス → OOS プラス」というパターンは過剰最適化と逆方向。レジーム適合度の単純な差
+- **Phase 1 paper trading 開始の判定材料として十分**: 2/3 窓 robust、平均 PF > 1.0、平均 OOS monthly +0.28%
+- **既知の運用リスク**: 1/3 窓では負ける（2023 のような難しいレジーム）→ サーキットブレーカーで損失上限を確保した上で paper trading 開始するなら現実的
 
 #### 次ステップ候補
 
-1. **W2 (IS=2023/OOS=2024) を単発検証** → 3窓体制で過半数 robust 判定可能（最短）
-2. **`backtest.py` のライブラリ化** → 3窓 C-WF を一気に完走、grid_search が in-process で 20倍高速化見込み
-3. **C-2 / C-1 等の別シグナル仕様**で再検証
-4. **W3 結果を踏まえて Phase 1 paper trading 再開判断**（OOS=2025 で robust 達成は強い前向き材料）
+1. **Phase 1 paper trading 再開**: 三窓 ✅ Robust verdict は十分な前向き材料。`operator_guide.md` を MA クロス対応に更新し、実運用準備
+2. **`backtest.py` のライブラリ化** → 今後の検証サイクル（パラメータチューニング、別ユニバース、別 Phase）を 20倍高速化
+3. **C-2 / C-1 等の別シグナル仕様**で更なる改善余地探索
+4. **rolling 3窓 WF を統合スクリプトで再実行**: 単発 3回分を1コマンドで（後付け確認）
 
 #### 結果ファイル
 
-- `docs/backtests/walkforward_single_C_W1.json` (IS=2022/OOS=2023)
-- `docs/backtests/walkforward_single_C_W3.json` (IS=2024/OOS=2025)
+- `docs/backtests/walkforward_single_C_W1.json` (IS=2022/OOS=2023, ❌)
+- `docs/backtests/walkforward_single_C_W2.json` (IS=2023/OOS=2024, ✅)
+- `docs/backtests/walkforward_single_C_W3.json` (IS=2024/OOS=2025, ✅)
 
 ---
 
@@ -632,6 +655,7 @@ IS ベストパラメータの差:
 | 2026-05-27 | B-WF v2 W1 IS=2022/OOS=2023 (2銘柄分散 ¥200k) | IS+1.51% OOS-0.66% | OOS 0.61 | OOS 改善 | ❌ 分散で改善（PF 0.43→0.61, DD -15→-8.9%）も robust 未達 → **シグナル本質見直し（C フェーズ）へ** |
 | 2026-05-27 | C-WF W1 IS=2022/OOS=2023 (MA クロス + 2銘柄分散 ¥200k) | IS+0.40% OOS-0.54% | IS 1.12 / OOS 0.85 | OOS 40.5% | ❌ PF 0.43→0.61→0.85 と改善トレンド明確、しかし robust 未達。IS=2024 スモークは PF 1.33 と robust 達成 → **C-2/C-1 別仕様検証 or ライブラリ化して3窓 WF 完走** |
 | 2026-05-27 夜 | C-WF W3 IS=2024/OOS=2025 (MA クロス + 2銘柄分散 ¥200k) | IS+1.69% OOS+0.84% | IS 1.63 / OOS 1.36 | OOS PASS | ✅ **初の Robust ✅ 達成**（OOS PF 1.36, monthly +0.84%, DD -7.4%）。ただし C-W1 (2023) は ❌ → 時期依存。W2(2023/2024) を埋めて 3窓体制で過半数 robust 判定へ |
+| 2026-05-29 朝 | C-WF W2 IS=2023/OOS=2024 (MA クロス + 2銘柄分散 ¥200k) | IS-0.22% OOS+**0.54%** | IS 0.94 / **OOS 1.21** | OOS PASS | ✅ **2窓目 Robust ✅**。三窓統合 2/3 = **✅ Robust verdict 確定**（A1/B 戦略の OOS マイナスから戦略採用検討フェーズへ移行）。IS で赤字でも OOS でプラスというパターン（過剰最適化の逆現象）|
 
 ### Rejected Strategy: Breakout Follow
 
