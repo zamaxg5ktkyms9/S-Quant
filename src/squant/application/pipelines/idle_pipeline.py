@@ -132,8 +132,10 @@ class IdlePipeline:
         )
 
         filtered_df = screener.exclude_recent_sales(filtered_df, forbidden)
+        # Multi-position: exclude tickers already in portfolio (held or pending)
+        filtered_df = screener.exclude_held_positions(filtered_df, portfolio.held_tickers)
         if filtered_df.empty:
-            logger.info("No candidates after recent-sales exclusion")
+            logger.info("No candidates after recent-sales/held exclusion")
             text, blocks = format_no_signal()
             self._notifier.send(text, blocks)
             return portfolio
@@ -141,22 +143,20 @@ class IdlePipeline:
         filtered_tickers = filtered_df["ticker"].tolist()
         logger.info(f"Candidates after screening: {len(filtered_tickers)}")
 
-        # Signal detection
-        # Merge volume columns so signal_engine can find {ticker}_vol
+        # Signal detection — pluggable strategy (pullback / ma_cross)
         ohlcv_for_signals = adj_close.copy()
         for col in volume.columns:
             ohlcv_for_signals[f"{col}_vol"] = volume[col]
 
-        candidates = signal_engine.detect_signals(
-            filtered_tickers, ohlcv_for_signals, fundamentals, today
-        )
+        signal_func = signal_engine.get_signal_func(self._settings.signal_strategy)
+        candidates = signal_func(filtered_tickers, ohlcv_for_signals, fundamentals, today)
         if not candidates:
             logger.info("No buy signals detected")
             text, blocks = format_no_signal()
             self._notifier.send(text, blocks)
             return portfolio
 
-        # Ranking: pick top-1
+        # Ranking: top-1 for now (multi-PendingSignal queueing は次フェーズで実装)
         top = ranking.rank(candidates, top_n=1)
         best = top[0]
         logger.info(f"Top candidate: {best.ticker} RSI={best.rsi14:.1f}")

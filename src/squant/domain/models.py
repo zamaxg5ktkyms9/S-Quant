@@ -27,12 +27,50 @@ class Position:
 
 @dataclass(frozen=True)
 class PortfolioState:
+    """Phase 1 multi-position portfolio (C strategy adopted 2026-05-29).
+
+    state はその日「主に表現する」フェーズを示すヒント:
+      - IDLE: positions / pending_signals / settle_dates すべて空
+      - SIGNAL_SENT: pending_signals が1件以上
+      - HOLDING: positions が1件以上
+      - SETTLING: positions 空 / settle_dates 1件以上
+    実運用では複数フェーズが同時併存しうる（例: holding 1件 + pending 1件）。
+    state は dispatcher のヒント・Slack 表示用で、各 pipeline は毎日順次実行される。
+    """
     state: SystemState
     cash_jpy: Decimal
-    position: Position | None = None
-    settle_date: date | None = None        # set when SETTLING
+    positions: tuple[Position, ...] = ()
+    pending_signals: tuple["PendingSignal", ...] = ()
+    settle_dates: tuple[date, ...] = ()
     last_run_id: str = ""
     cumulative_pnl_jpy: Decimal = Decimal("0")
+
+    # ── 後方互換プロパティ ─────────────────────────────────────────
+    @property
+    def position(self) -> Position | None:
+        """単一 Position アクセス（後方互換、保有が1件以下の場合のみ意味あり）。"""
+        return self.positions[0] if self.positions else None
+
+    @property
+    def settle_date(self) -> date | None:
+        """単一 settle_date アクセス（後方互換、settle_dates が1件以下のときの直近）。"""
+        return self.settle_dates[0] if self.settle_dates else None
+
+    # ── 集約・派生情報 ─────────────────────────────────────────────
+    @property
+    def open_slots(self) -> int:
+        """残スロット数。max_positions は Settings から渡す前提で、ここでは未計算。
+        呼び出し側で `settings.max_positions - portfolio.in_use_slots` を取る。"""
+        return -(len(self.positions) + len(self.pending_signals))  # callerで反転
+
+    @property
+    def in_use_slots(self) -> int:
+        """既保有 + 約定待ち pending の合計（スロットを消費しているもの）。"""
+        return len(self.positions) + len(self.pending_signals)
+
+    @property
+    def held_tickers(self) -> set[str]:
+        return {p.ticker for p in self.positions} | {ps.signal.ticker for ps in self.pending_signals}
 
 
 @dataclass(frozen=True)

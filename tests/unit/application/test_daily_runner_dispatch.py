@@ -214,7 +214,7 @@ class TestDispatchOtherStates:
         portfolio = PortfolioState(
             state=SystemState.SETTLING,
             cash_jpy=Decimal("100000"),
-            settle_date=date(2026, 5, 13),
+            settle_dates=(date(2026, 5, 13),),
         )
         runner._dispatch(portfolio, "run1")
         runner._settling.run.assert_called_once_with(portfolio, "run1")

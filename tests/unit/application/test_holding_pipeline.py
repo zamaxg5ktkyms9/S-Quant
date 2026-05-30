@@ -95,7 +95,7 @@ class TestHoldingPipelineNoData:
         portfolio = PortfolioState(
             state=SystemState.HOLDING,
             cash_jpy=Decimal("0"),
-            position=position,
+            positions=(position,),
         )
         result = pipeline.run(portfolio, "run1")
         assert result.state == SystemState.HOLDING
@@ -106,7 +106,7 @@ class TestHoldingPipelineNoData:
         portfolio = PortfolioState(
             state=SystemState.HOLDING,
             cash_jpy=Decimal("100000"),
-            position=None,
+            positions=(),
         )
         result = pipeline.run(portfolio, "run1")
         assert result.state == SystemState.IDLE
@@ -121,7 +121,7 @@ class TestHoldingPipelineStopLoss:
         portfolio = PortfolioState(
             state=SystemState.HOLDING,
             cash_jpy=Decimal("0"),
-            position=position,
+            positions=(position,),
         )
         result = pipeline.run(portfolio, "run1")
         assert result.state == SystemState.SETTLING
@@ -137,7 +137,7 @@ class TestHoldingPipelineStopLoss:
         portfolio = PortfolioState(
             state=SystemState.HOLDING,
             cash_jpy=Decimal("0"),
-            position=position,
+            positions=(position,),
         )
         result = pipeline.run(portfolio, "run1")
         # P&L = (480 - 500) * 100 = -2000
@@ -153,7 +153,7 @@ class TestHoldingPipelineTakeProfit:
         portfolio = PortfolioState(
             state=SystemState.HOLDING,
             cash_jpy=Decimal("0"),
-            position=position,
+            positions=(position,),
         )
         result = pipeline.run(portfolio, "run1")
         assert result.state == SystemState.SETTLING
@@ -171,7 +171,7 @@ class TestHoldingPipelineTimeStop:
         portfolio = PortfolioState(
             state=SystemState.HOLDING,
             cash_jpy=Decimal("0"),
-            position=position,
+            positions=(position,),
         )
         result = pipeline.run(portfolio, "run1")
         assert result.state == SystemState.SETTLING
@@ -186,7 +186,7 @@ class TestHoldingPipelineHold:
         portfolio = PortfolioState(
             state=SystemState.HOLDING,
             cash_jpy=Decimal("0"),
-            position=position,
+            positions=(position,),
         )
         result = pipeline.run(portfolio, "run1")
         assert result.state == SystemState.HOLDING
@@ -202,7 +202,7 @@ class TestHoldingPipelineHold:
         portfolio = PortfolioState(
             state=SystemState.HOLDING,
             cash_jpy=Decimal("0"),
-            position=position,
+            positions=(position,),
         )
         result = pipeline.run(portfolio, "run1")
         if result.state == SystemState.HOLDING and result.position:
@@ -218,7 +218,7 @@ class TestHoldingPipelineHold:
             portfolio = PortfolioState(
                 state=SystemState.HOLDING,
                 cash_jpy=Decimal("0"),
-                position=position,
+                positions=(position,),
             )
             pipeline.run(portfolio, "run1")
             state_repo.save_portfolio.assert_not_called()

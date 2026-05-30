@@ -300,10 +300,13 @@ class DailyRunner:
         )
 
         cost = actual_price * actual_shares
+        # Append to existing positions (multi-position support)
+        new_positions = portfolio.positions + (position,)
         new_portfolio = PortfolioState(
             state=SystemState.HOLDING,
             cash_jpy=portfolio.cash_jpy - cost,
-            position=position,
+            positions=new_positions,
+            settle_dates=portfolio.settle_dates,
             last_run_id=run_id,
             cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
         )

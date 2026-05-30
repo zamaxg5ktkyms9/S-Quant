@@ -29,6 +29,13 @@ from squant.domain.indicators import rolling_std, rsi, sma, volume_surge_ratio
 from squant.domain.models import Candidate
 
 
+def get_signal_func(strategy: str):
+    """Settings.signal_strategy ("pullback" | "ma_cross") に対応する検出関数を返す。"""
+    if strategy == "ma_cross":
+        return detect_signals_ma_cross
+    return detect_signals  # default: pullback (A1 戦略、後方互換)
+
+
 def detect_signals(
     filtered_tickers: list[str],
     ohlcv: pd.DataFrame,

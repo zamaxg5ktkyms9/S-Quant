@@ -118,8 +118,8 @@ class SheetsStateRepository:
         return PortfolioState(
             state=_parse_state_safe(r.get("state", "")),
             cash_jpy=Decimal(r["cash_jpy"] or "100000"),
-            position=position,
-            settle_date=_d(r["settle_date"]) if r.get("settle_date") else None,
+            positions=(position,) if position else (),
+            settle_dates=(_d(r["settle_date"]),) if r.get("settle_date") else (),
             last_run_id=r.get("last_run_id", ""),
             cumulative_pnl_jpy=Decimal(r.get("cumulative_pnl_jpy") or "0"),
         )

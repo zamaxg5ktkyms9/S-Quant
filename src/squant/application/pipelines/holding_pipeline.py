@@ -40,17 +40,75 @@ class HoldingPipeline:
         self._settings = settings
 
     def run(self, portfolio: PortfolioState, run_id: str) -> PortfolioState:
-        today = self._clock.today_jst()
-        position = portfolio.position
+        """Evaluate exit rules for each held Position independently.
 
-        if position is None:
-            logger.error("HOLDING state but no position — resetting to IDLE")
+        Multi-position support (2026-05-30): when portfolio has multiple positions,
+        process each through the same single-position pipeline sequentially, then
+        aggregate the results into one PortfolioState.
+        """
+        if not portfolio.positions:
+            logger.error("HOLDING state but no positions — resetting to IDLE")
             return PortfolioState(
                 state=SystemState.IDLE,
                 cash_jpy=portfolio.cash_jpy,
+                pending_signals=portfolio.pending_signals,
+                settle_dates=portfolio.settle_dates,
                 last_run_id=run_id,
                 cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
             )
+
+        # Multi-position: run the single-position loop body for each position,
+        # threading the cash / settle_dates / cumulative_pnl through iterations.
+        if len(portfolio.positions) > 1:
+            current = portfolio
+            for pos in portfolio.positions:
+                # Build a single-position view for the legacy body, preserving the
+                # accumulating fields, and merge results back into `current`.
+                single_view = PortfolioState(
+                    state=SystemState.HOLDING,
+                    cash_jpy=current.cash_jpy,
+                    positions=(pos,),
+                    pending_signals=(),
+                    settle_dates=(),
+                    last_run_id=current.last_run_id,
+                    cumulative_pnl_jpy=current.cumulative_pnl_jpy,
+                )
+                result = self._run_single(single_view, run_id)
+                # Aggregate
+                current = PortfolioState(
+                    state=result.state if result.positions else current.state,
+                    cash_jpy=result.cash_jpy,
+                    positions=current.positions[:current.positions.index(pos)]
+                              + result.positions
+                              + current.positions[current.positions.index(pos)+1:],
+                    pending_signals=current.pending_signals,
+                    settle_dates=current.settle_dates + result.settle_dates,
+                    last_run_id=run_id,
+                    cumulative_pnl_jpy=result.cumulative_pnl_jpy,
+                )
+            # Final state: HOLDING if any positions remain, else SETTLING/IDLE
+            remaining = tuple(p for p in current.positions if p is not None)
+            if remaining:
+                final_state = SystemState.HOLDING
+            elif current.settle_dates:
+                final_state = SystemState.SETTLING
+            else:
+                final_state = SystemState.IDLE
+            return PortfolioState(
+                state=final_state,
+                cash_jpy=current.cash_jpy,
+                positions=remaining,
+                pending_signals=current.pending_signals,
+                settle_dates=current.settle_dates,
+                last_run_id=run_id,
+                cumulative_pnl_jpy=current.cumulative_pnl_jpy,
+            )
+
+        return self._run_single(portfolio, run_id)
+
+    def _run_single(self, portfolio: PortfolioState, run_id: str) -> PortfolioState:
+        today = self._clock.today_jst()
+        position = portfolio.positions[0]
 
         # Fetch recent OHLCV for the held ticker
         start = today - timedelta(days=30)
@@ -125,7 +183,7 @@ class HoldingPipeline:
             new_portfolio = PortfolioState(
                 state=SystemState.HOLDING,
                 cash_jpy=portfolio.cash_jpy,
-                position=updated_position,
+                positions=(updated_position,),
                 last_run_id=run_id,
                 cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
             )
@@ -161,8 +219,8 @@ class HoldingPipeline:
         new_portfolio = PortfolioState(
             state=SystemState.SETTLING,
             cash_jpy=new_cash,
-            position=None,
-            settle_date=settle_date,
+            positions=(),
+            settle_dates=(settle_date,),
             last_run_id=run_id,
             cumulative_pnl_jpy=new_cumulative,
         )

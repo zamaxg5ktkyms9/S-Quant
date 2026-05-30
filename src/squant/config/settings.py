@@ -20,7 +20,9 @@ class Settings(BaseSettings):
 
     # Trading overrides
     dry_run: bool = Field(default=False, alias="DRY_RUN")
-    budget_jpy: Decimal = Field(default=Decimal("100000"), alias="BUDGET_JPY")
+    budget_jpy: Decimal = Field(default=Decimal("200000"), alias="BUDGET_JPY")  # Phase 1 = ¥200k (C strategy)
+    max_positions: int = Field(default=2, alias="MAX_POSITIONS")  # Phase 1 = 2 banks
+    signal_strategy: str = Field(default="ma_cross", alias="SIGNAL_STRATEGY")  # "pullback" | "ma_cross"
     gap_up_threshold: Decimal = Field(default=Decimal("0.02"), alias="GAP_UP_THRESHOLD")
     stop_loss_rate: Decimal = Field(default=Decimal("0.025"), alias="STOP_LOSS_RATE")
     time_stop_days: int = Field(default=5, alias="TIME_STOP_DAYS")
