@@ -1,6 +1,7 @@
 """IDLE state pipeline: screen → signal → rank → notify."""
 
 from datetime import date, timedelta
+from decimal import Decimal
 
 from squant.config.settings import Settings
 from squant.domain import ranking, screener, signal_engine
@@ -14,7 +15,6 @@ from squant.domain.quantity_calculator import (
 from squant.infrastructure.data_validator import DataValidator, Severity
 from squant.infrastructure.interfaces import IClock, IMarketDataClient, INotifier, IStateRepository
 from squant.presentation.slack_formatter import (
-    format_buy_signal,
     format_buy_signals_summary,
     format_no_signal,
 )
