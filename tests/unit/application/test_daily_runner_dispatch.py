@@ -61,6 +61,7 @@ def _make_runner(
         cash_jpy=Decimal("100000"),
     )
     state_repo.load_pending_signal.return_value = pending
+    state_repo.load_pending_signals.return_value = (pending,) if pending is not None else ()
     state_repo.load_circuit_breaker.return_value = CircuitBreakerStatus(
         is_tripped=False, cumulative_loss_jpy=Decimal("0"), tripped_at=None
     )

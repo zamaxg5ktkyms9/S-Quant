@@ -168,10 +168,13 @@ class SheetsStateRepository:
 
     # ── Pending signal ─────────────────────────────────────────────────────────
 
-    def save_pending_signal(self, pending: PendingSignal) -> None:
+    # ── Pending signals (multi-position 2026-05-30) ────────────────────────────
+
+    @staticmethod
+    def _row_from_pending(pending: PendingSignal) -> list[str]:
         s = pending.signal
-        row = [
-            s.generated_at.isoformat(),  # reuse as run_id proxy
+        return [
+            s.generated_at.isoformat(),
             s.ticker,
             str(s.reference_price),
             str(s.shares),
@@ -185,13 +188,9 @@ class SheetsStateRepository:
             str(pending.actual_shares) if pending.actual_shares else "",
             pending.confirmed_at.isoformat() if pending.confirmed_at else "",
         ]
-        self._c.overwrite_sheet(SHEET_PENDING_SIGNALS, [_PENDING_HEADER, row])
 
-    def load_pending_signal(self) -> PendingSignal | None:
-        rows = self._c.read_all(SHEET_PENDING_SIGNALS)
-        if len(rows) < 2 or not rows[1][0]:
-            return None
-        r = dict(zip(_PENDING_HEADER, rows[1]))  # noqa: B905
+    @staticmethod
+    def _pending_from_row(r: dict[str, str]) -> PendingSignal | None:
         if not r.get("ticker"):
             return None
         signal = Signal(
@@ -212,27 +211,85 @@ class SheetsStateRepository:
             confirmed_at=_dt(r["confirmed_at"]) if r.get("confirmed_at") else None,
         )
 
+    def save_pending_signals(self, pendings: tuple[PendingSignal, ...]) -> None:
+        rows = [_PENDING_HEADER]
+        for p in pendings:
+            rows.append(self._row_from_pending(p))
+        self._c.overwrite_sheet(SHEET_PENDING_SIGNALS, rows)
+
+    def load_pending_signals(self) -> tuple[PendingSignal, ...]:
+        rows = self._c.read_all(SHEET_PENDING_SIGNALS)
+        if len(rows) < 2:
+            return ()
+        out: list[PendingSignal] = []
+        for raw in rows[1:]:
+            if not raw or not raw[0]:
+                continue
+            r = dict(zip(_PENDING_HEADER, raw))  # noqa: B905
+            ps = self._pending_from_row(r)
+            if ps is not None:
+                out.append(ps)
+        return tuple(out)
+
+    # Back-compat single-signal methods
+    def save_pending_signal(self, pending: PendingSignal) -> None:
+        self.save_pending_signals((pending,))
+
+    def load_pending_signal(self) -> PendingSignal | None:
+        items = self.load_pending_signals()
+        return items[0] if items else None
+
     def confirm_pending_signal(
-        self, actual_price: float, actual_shares: int, confirmed_at: datetime
+        self,
+        actual_price: float,
+        actual_shares: int,
+        confirmed_at: datetime,
+        ticker: str | None = None,
     ) -> None:
         rows = self._c.read_all(SHEET_PENDING_SIGNALS)
         if len(rows) < 2:
             return
-        r = list(rows[1])
         col = _PENDING_HEADER
+        ticker_col = col.index("ticker")
+        # Find the target row (by ticker, or the first valid one if not specified)
+        target_idx = None
+        for idx, raw in enumerate(rows[1:], start=2):
+            if not raw or len(raw) <= ticker_col or not raw[ticker_col]:
+                continue
+            if ticker is None or raw[ticker_col] == ticker:
+                target_idx = idx
+                break
+        if target_idx is None:
+            return
+        r = list(rows[target_idx - 1])
+        # Ensure row is wide enough
+        while len(r) < len(col):
+            r.append("")
         r[col.index("execution_status")] = ExecutionStatus.FILLED.value
         r[col.index("actual_entry_price")] = str(actual_price)
         r[col.index("actual_shares")] = str(actual_shares)
         r[col.index("confirmed_at")] = confirmed_at.isoformat()
-        self._c.update_row(SHEET_PENDING_SIGNALS, 2, r)
+        self._c.update_row(SHEET_PENDING_SIGNALS, target_idx, r)
 
-    def cancel_pending_signal(self) -> None:
+    def cancel_pending_signal(self, ticker: str | None = None) -> None:
         rows = self._c.read_all(SHEET_PENDING_SIGNALS)
         if len(rows) < 2:
             return
-        r = list(rows[1])
-        r[_PENDING_HEADER.index("execution_status")] = ExecutionStatus.CANCELLED.value
-        self._c.update_row(SHEET_PENDING_SIGNALS, 2, r)
+        col = _PENDING_HEADER
+        ticker_col = col.index("ticker")
+        status_col = col.index("execution_status")
+        # If ticker is None, cancel all. Otherwise cancel only the matching row.
+        for idx, raw in enumerate(rows[1:], start=2):
+            if not raw or len(raw) <= ticker_col or not raw[ticker_col]:
+                continue
+            if ticker is None or raw[ticker_col] == ticker:
+                r = list(raw)
+                while len(r) < len(col):
+                    r.append("")
+                r[status_col] = ExecutionStatus.CANCELLED.value
+                self._c.update_row(SHEET_PENDING_SIGNALS, idx, r)
+                if ticker is not None:
+                    return
 
     # ── Circuit breaker ────────────────────────────────────────────────────────
 

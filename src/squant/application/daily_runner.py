@@ -209,55 +209,11 @@ class DailyRunner:
 
     def _dispatch(self, portfolio: PortfolioState, run_id: str) -> PortfolioState:
         if portfolio.state in (SystemState.IDLE, SystemState.SIGNAL_SENT):
-            # SIGNAL_SENT: check operator confirmation before issuing new signal
+            # SIGNAL_SENT: check operator confirmation across ALL pending signals.
+            # After resolving pending signals we always return — the next idle
+            # scan happens on the following run, never the same one.
             if portfolio.state == SystemState.SIGNAL_SENT:
-                pending = self._repo.load_pending_signal()
-                if pending is None:
-                    # Sheet was cleared or corrupted while in SIGNAL_SENT — reset to IDLE
-                    # rather than generating a duplicate signal.
-                    logger.warning("SIGNAL_SENT state but no pending signal in sheet — resetting to IDLE")
-                    new = PortfolioState(
-                        state=SystemState.IDLE,
-                        cash_jpy=portfolio.cash_jpy,
-                        last_run_id=run_id,
-                        cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
-                    )
-                    if not self._settings.dry_run:
-                        self._repo.save_portfolio(new)
-                    return new
-                from squant.domain.enums import ExecutionStatus
-                if pending.execution_status == ExecutionStatus.FILLED:
-                    return self._confirm_entry(portfolio, pending, run_id)
-                elif pending.execution_status == ExecutionStatus.CANCELLED:
-                    logger.info("Operator cancelled signal — returning to IDLE")
-                    new = PortfolioState(
-                        state=SystemState.IDLE,
-                        cash_jpy=portfolio.cash_jpy,
-                        last_run_id=run_id,
-                        cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
-                    )
-                    if not self._settings.dry_run:
-                        self._repo.save_portfolio(new)
-                    return new
-                else:
-                    # Still pending — timeout check (1 trading day)
-                    if pending.signal.generated_at.date() < self._clock.today_jst():
-                        logger.warning("Signal timed out with no operator response — reverting to IDLE")
-                        new = PortfolioState(
-                            state=SystemState.IDLE,
-                            cash_jpy=portfolio.cash_jpy,
-                            last_run_id=run_id,
-                            cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
-                        )
-                        if not self._settings.dry_run:
-                            self._repo.save_portfolio(new)
-                            self._repo.cancel_pending_signal()
-                        self._notifier.send(
-                            f"[S-Quant] オペレータ応答なし — IDLEに戻りました\n"
-                            f"（{pending.signal.ticker} の注文は未確認のため発注なしとみなします）"
-                        )
-                        return new
-                    return portfolio  # still same day, wait
+                return self._process_pending_signals(portfolio, run_id)
 
             return self._idle.run(portfolio, run_id)
 
@@ -270,6 +226,81 @@ class DailyRunner:
         else:
             logger.error(f"Unknown state: {portfolio.state}")
             return portfolio
+
+    def _process_pending_signals(self, portfolio: PortfolioState, run_id: str) -> PortfolioState:
+        """Resolve each pending signal: confirm fills, drop cancellations, time-out stale ones.
+
+        Multi-position support: walks every PendingSignal returned by the repo,
+        keeping pendings that are still awaiting operator confirmation, appending
+        confirmed Positions to portfolio.positions, and ending with the correct
+        aggregate state (HOLDING if any position, SIGNAL_SENT if any unresolved,
+        IDLE otherwise).
+        """
+        from squant.domain.enums import ExecutionStatus
+
+        pendings = self._repo.load_pending_signals()
+        if not pendings:
+            logger.warning("SIGNAL_SENT state but no pending signals in sheet — resetting to IDLE")
+            new = PortfolioState(
+                state=SystemState.IDLE,
+                cash_jpy=portfolio.cash_jpy,
+                positions=portfolio.positions,
+                pending_signals=(),
+                settle_dates=portfolio.settle_dates,
+                last_run_id=run_id,
+                cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
+            )
+            if not self._settings.dry_run:
+                self._repo.save_portfolio(new)
+            return new
+
+        today = self._clock.today_jst()
+        current = portfolio
+        remaining_pendings: list = []
+
+        for pending in pendings:
+            if pending.execution_status == ExecutionStatus.FILLED:
+                current = self._confirm_entry(current, pending, run_id)
+            elif pending.execution_status == ExecutionStatus.CANCELLED:
+                logger.info(f"Operator cancelled signal {pending.signal.ticker}")
+            elif pending.signal.generated_at.date() < today:
+                logger.warning(
+                    f"Signal {pending.signal.ticker} timed out — treating as cancelled"
+                )
+                self._notifier.send(
+                    f"[S-Quant] オペレータ応答なし — {pending.signal.ticker} の注文は"
+                    f"未確認のため発注なしとみなします"
+                )
+                if not self._settings.dry_run:
+                    self._repo.cancel_pending_signal(pending.signal.ticker)
+            else:
+                # Still awaiting confirmation, keep
+                remaining_pendings.append(pending)
+
+        # Final state recomputation
+        if current.positions:
+            new_state = SystemState.HOLDING
+        elif remaining_pendings:
+            new_state = SystemState.SIGNAL_SENT
+        elif current.settle_dates:
+            new_state = SystemState.SETTLING
+        else:
+            new_state = SystemState.IDLE
+
+        new = PortfolioState(
+            state=new_state,
+            cash_jpy=current.cash_jpy,
+            positions=current.positions,
+            pending_signals=tuple(remaining_pendings),
+            settle_dates=current.settle_dates,
+            last_run_id=run_id,
+            cumulative_pnl_jpy=current.cumulative_pnl_jpy,
+        )
+        if not self._settings.dry_run and new != portfolio:
+            self._repo.save_portfolio(new)
+            # Persist the trimmed pending tab (drop confirmed/cancelled/timed-out)
+            self._repo.save_pending_signals(tuple(remaining_pendings))
+        return new
 
     def _confirm_entry(
         self, portfolio: PortfolioState, pending: "PendingSignal", run_id: str  # type: ignore[name-defined]  # noqa: F821

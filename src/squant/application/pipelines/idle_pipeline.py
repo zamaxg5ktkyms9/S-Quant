@@ -156,59 +156,80 @@ class IdlePipeline:
             self._notifier.send(text, blocks)
             return portfolio
 
-        # Ranking: top-1 for now (multi-PendingSignal queueing は次フェーズで実装)
-        top = ranking.rank(candidates, top_n=1)
-        best = top[0]
-        logger.info(f"Top candidate: {best.ticker} RSI={best.rsi14:.1f}")
+        # Multi-position: rank top-N where N = open slots
+        open_slots = max(0, self._settings.max_positions - portfolio.in_use_slots)
+        if open_slots == 0:
+            logger.info("No open slots — skipping signal generation")
+            return portfolio
+        top = ranking.rank(candidates, top_n=open_slots)
+        logger.info(f"Top candidates ({len(top)}/{open_slots} slots): "
+                    + ", ".join(f"{c.ticker}(RSI={c.rsi14:.1f})" for c in top))
 
-        # Quantity calculation
-        try:
-            shares = compute_quantity(
-                available_cash=portfolio.cash_jpy,
-                prev_close=best.close,
-                gap_up_threshold=self._settings.gap_up_threshold,
-                budget=self._settings.budget_jpy,
+        # Per-slot dynamic budget: remaining cash split across remaining open slots
+        # (more accurate when partial fills are tracked; simple split for now)
+        slot_budget = (portfolio.cash_jpy / open_slots).quantize(Decimal("1"))
+        strategy = self._settings.signal_strategy
+
+        new_pendings: list[PendingSignal] = []
+        for best in top:
+            try:
+                shares = compute_quantity(
+                    available_cash=portfolio.cash_jpy,
+                    prev_close=best.close,
+                    gap_up_threshold=self._settings.gap_up_threshold,
+                    budget=slot_budget,
+                )
+            except InsufficientCapitalError as e:
+                logger.warning(f"Skip {best.ticker}: {e}")
+                continue
+
+            cancel_price = compute_cancel_threshold(best.close, self._settings.gap_up_threshold)
+            stop_price = compute_stop_loss_price(best.close, self._settings.stop_loss_rate)
+
+            if strategy == "ma_cross":
+                reason = (
+                    f"5×25日MAクロス | 出来高急増={best.volume_surge_ratio:.2f}× | "
+                    f"PBR={best.pbr:.2f} | 25日MA上向き"
+                )
+            else:
+                reason = (
+                    f"RSI={best.rsi14:.1f} | 出来高急増={best.volume_surge_ratio:.2f}× | "
+                    f"PBR={best.pbr:.2f} | MA75上方 | ボラ収束"
+                )
+
+            signal = Signal(
+                ticker=best.ticker,
+                reference_price=best.close,
+                shares=shares,
+                cancel_above_price=cancel_price,
+                stop_loss_price=stop_price,
+                rsi=best.rsi14,
+                reason=reason,
+                generated_at=self._clock.now_jst(),
             )
-        except InsufficientCapitalError as e:
-            logger.error(str(e))
-            self._notifier.send_error("資金不足", str(e))
+            new_pendings.append(PendingSignal(signal=signal))
+            text, blocks = format_buy_signal(signal)
+            self._notifier.send(text, blocks)
+            logger.info(f"BUY signal sent: {signal.ticker} ×{signal.shares}")
+
+        if not new_pendings:
+            logger.info("No pending signals generated (all skipped)")
             return portfolio
 
-        cancel_price = compute_cancel_threshold(best.close, self._settings.gap_up_threshold)
-        stop_price = compute_stop_loss_price(best.close, self._settings.stop_loss_rate)
-
-        reason = (
-            f"RSI={best.rsi14:.1f} | 出来高急増={best.volume_surge_ratio:.2f}× | "
-            f"PBR={best.pbr:.2f} | MA75上方 | ボラ収束"
-        )
-
-        signal = Signal(
-            ticker=best.ticker,
-            reference_price=best.close,
-            shares=shares,
-            cancel_above_price=cancel_price,
-            stop_loss_price=stop_price,
-            rsi=best.rsi14,
-            reason=reason,
-            generated_at=self._clock.now_jst(),
-        )
-
-        pending = PendingSignal(signal=signal)
+        # Merge with any existing pending signals (e.g. from yesterday awaiting fill)
+        all_pendings = portfolio.pending_signals + tuple(new_pendings)
 
         if not self._settings.dry_run:
-            self._repo.save_pending_signal(pending)
-
-        text, blocks = format_buy_signal(signal)
-        self._notifier.send(text, blocks)
-        logger.info(f"BUY signal sent: {signal.ticker} ×{signal.shares}")
-
-        # Transition to SIGNAL_SENT state (awaiting operator confirmation)
+            self._repo.save_pending_signals(all_pendings)
 
         from squant.domain.enums import SystemState
 
         new_portfolio = PortfolioState(
             state=SystemState.SIGNAL_SENT,
             cash_jpy=portfolio.cash_jpy,
+            positions=portfolio.positions,
+            pending_signals=all_pendings,
+            settle_dates=portfolio.settle_dates,
             last_run_id=run_id,
             cumulative_pnl_jpy=portfolio.cumulative_pnl_jpy,
         )
