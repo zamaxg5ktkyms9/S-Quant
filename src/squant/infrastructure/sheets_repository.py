@@ -1,5 +1,6 @@
 """Google Sheets state repository — maps domain models ↔ sheet rows."""
 
+import json
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -63,11 +64,80 @@ def _str(v: Any) -> str:
 # ── Schema definitions (column order) ─────────────────────────────────────────
 
 _PORTFOLIO_HEADER = [
+    # Single-position display columns (first held position) — kept for at-a-glance
+    # readability; multi-position truth is in positions_json / settle_dates_csv.
     "state", "cash_jpy", "ticker", "shares",
     "entry_price", "intended_entry_price", "entry_date",
     "stop_loss_price", "trailing_stop_price", "highest_price_since_entry",
     "time_stop_date", "settle_date", "last_run_id", "cumulative_pnl_jpy",
+    # Multi-position persistence (2026-05-30):
+    "positions_json", "settle_dates_csv",
 ]
+
+
+def _serialize_positions(positions: tuple[Position, ...]) -> str:
+    """Encode a tuple of Position into a single JSON string for the positions_json column."""
+    if not positions:
+        return ""
+    items = [
+        {
+            "ticker": p.ticker,
+            "shares": p.shares,
+            "entry_price": str(p.entry_price),
+            "intended_entry_price": str(p.intended_entry_price),
+            "entry_date": p.entry_date.strftime(_DATE_FMT),
+            "stop_loss_price": str(p.stop_loss_price),
+            "trailing_stop_price": str(p.trailing_stop_price),
+            "highest_price_since_entry": str(p.highest_price_since_entry),
+            "time_stop_date": p.time_stop_date.strftime(_DATE_FMT),
+        }
+        for p in positions
+    ]
+    return json.dumps(items, ensure_ascii=False, separators=(",", ":"))
+
+
+def _deserialize_positions(raw: str) -> tuple[Position, ...]:
+    if not raw:
+        return ()
+    try:
+        items = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        logger.error(f"positions_json malformed — skipping: {raw[:200]}")
+        return ()
+    out: list[Position] = []
+    for item in items:
+        try:
+            out.append(Position(
+                ticker=item["ticker"],
+                shares=int(item["shares"]),
+                entry_price=Decimal(item["entry_price"]),
+                intended_entry_price=Decimal(item["intended_entry_price"]),
+                entry_date=_d(item["entry_date"]),
+                stop_loss_price=Decimal(item["stop_loss_price"]),
+                trailing_stop_price=Decimal(item["trailing_stop_price"]),
+                highest_price_since_entry=Decimal(item["highest_price_since_entry"]),
+                time_stop_date=_d(item["time_stop_date"]),
+            ))
+        except (KeyError, ValueError) as e:
+            logger.error(f"positions_json item invalid — skipping one entry: {e}")
+    return tuple(out)
+
+
+def _serialize_settle_dates(settle_dates: tuple[date, ...]) -> str:
+    return ",".join(d.strftime(_DATE_FMT) for d in settle_dates)
+
+
+def _deserialize_settle_dates(raw: str) -> tuple[date, ...]:
+    if not raw:
+        return ()
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    out: list[date] = []
+    for p in parts:
+        try:
+            out.append(_d(p))
+        except ValueError:
+            logger.warning(f"settle_dates_csv invalid entry: {p}")
+    return tuple(out)
 
 _TRADES_HEADER = [
     "run_id", "ticker", "side", "shares", "price",
@@ -99,12 +169,17 @@ class SheetsStateRepository:
         if len(rows) < 2 or not rows[1][0]:
             return PortfolioState(
                 state=SystemState.IDLE,
-                cash_jpy=Decimal("100000"),
+                cash_jpy=Decimal("200000"),  # Phase 1 default after C adoption
             )
-        r = dict(zip(_PORTFOLIO_HEADER, rows[1]))  # noqa: B905
-        position = None
-        if r.get("ticker"):
-            position = Position(
+        # Pad to header length so dict-zip works even with the new JSON columns absent
+        raw = list(rows[1]) + [""] * (len(_PORTFOLIO_HEADER) - len(rows[1]))
+        r = dict(zip(_PORTFOLIO_HEADER, raw))  # noqa: B905
+
+        # Prefer the multi-position JSON column. If it's missing or malformed, fall
+        # back to the single-position display columns (back-compat with old sheets).
+        positions = _deserialize_positions(r.get("positions_json", ""))
+        if not positions and r.get("ticker"):
+            positions = (Position(
                 ticker=r["ticker"],
                 shares=int(r["shares"] or 0),
                 entry_price=Decimal(r["entry_price"] or "0"),
@@ -114,18 +189,26 @@ class SheetsStateRepository:
                 trailing_stop_price=Decimal(r["trailing_stop_price"] or "0"),
                 highest_price_since_entry=Decimal(r["highest_price_since_entry"] or "0"),
                 time_stop_date=_d(r["time_stop_date"]),
-            )
+            ),)
+
+        settle_dates = _deserialize_settle_dates(r.get("settle_dates_csv", ""))
+        if not settle_dates and r.get("settle_date"):
+            settle_dates = (_d(r["settle_date"]),)
+
         return PortfolioState(
             state=_parse_state_safe(r.get("state", "")),
-            cash_jpy=Decimal(r["cash_jpy"] or "100000"),
-            positions=(position,) if position else (),
-            settle_dates=(_d(r["settle_date"]),) if r.get("settle_date") else (),
+            cash_jpy=Decimal(r["cash_jpy"] or "200000"),
+            positions=positions,
+            settle_dates=settle_dates,
             last_run_id=r.get("last_run_id", ""),
             cumulative_pnl_jpy=Decimal(r.get("cumulative_pnl_jpy") or "0"),
         )
 
     def save_portfolio(self, state: PortfolioState) -> None:
-        p = state.position
+        # Display columns reflect the first held position (if any) for at-a-glance
+        # readability; the authoritative storage is positions_json / settle_dates_csv.
+        p = state.positions[0] if state.positions else None
+        first_settle = state.settle_dates[0] if state.settle_dates else None
         row = [
             state.state.value,
             str(state.cash_jpy),
@@ -138,9 +221,11 @@ class SheetsStateRepository:
             str(p.trailing_stop_price) if p else "",
             str(p.highest_price_since_entry) if p else "",
             p.time_stop_date.strftime(_DATE_FMT) if p else "",
-            state.settle_date.strftime(_DATE_FMT) if state.settle_date else "",
+            first_settle.strftime(_DATE_FMT) if first_settle else "",
             state.last_run_id,
             str(state.cumulative_pnl_jpy),
+            _serialize_positions(state.positions),
+            _serialize_settle_dates(state.settle_dates),
         ]
         rows = self._c.read_all(SHEET_PORTFOLIO)
         if len(rows) < 1 or rows[0] != _PORTFOLIO_HEADER:

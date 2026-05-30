@@ -171,3 +171,92 @@ def format_circuit_breaker() -> tuple[str, list[dict]]:
         }
     ]
     return text, blocks
+
+
+# ── Multi-position summary helpers (2026-05-30) ────────────────────────────
+
+def format_buy_signals_summary(signals: list[Signal]) -> tuple[str, list[dict]]:
+    """Summarise N BUY signals into a single notification.
+
+    Used when idle_pipeline queues multiple pending signals in one run
+    (Phase 1 = 2 stocks, Phase 2/3 = 3 stocks).
+    """
+    if not signals:
+        return format_no_signal()
+    if len(signals) == 1:
+        return format_buy_signal(signals[0])
+
+    headers = ", ".join(s.ticker for s in signals)
+    text = f"[BUY SIGNALS x{len(signals)}] {headers}"
+
+    fields = []
+    for s in signals:
+        fields.append(
+            {"type": "mrkdwn", "text": (
+                f"*{s.ticker}* ×{s.shares}株\n"
+                f"参照値: ¥{int(s.reference_price)}\n"
+                f"キャンセル条件: 寄付き > ¥{int(s.cancel_above_price)}\n"
+                f"損切ライン: ¥{int(s.stop_loss_price)}"
+            )}
+        )
+
+    blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": f":chart_with_upwards_trend: BUY SIGNALS × {len(signals)}"},
+        },
+        {"type": "section", "fields": fields},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    "*各銘柄について発注後、Sheets の pending_signals タブに記入してください*\n"
+                    "`ticker` 列で各銘柄を識別し、`actual_entry_price` / `actual_shares` / `execution_status` を更新。"
+                ),
+            },
+        },
+        {"type": "divider"},
+        {
+            "type": "context",
+            "elements": [
+                {"type": "mrkdwn",
+                 "text": f"生成: {signals[0].generated_at.strftime('%Y-%m-%d %H:%M JST')}"},
+            ],
+        },
+    ]
+    return text, blocks
+
+
+def format_hold_statuses_summary(items: list[tuple[str, int, Decimal, Decimal]]) -> tuple[str, list[dict]]:
+    """Summarise N HOLD statuses into one notification.
+
+    items: list of (ticker, days_held, current_close, trailing_stop)
+    """
+    if not items:
+        return "[S-Quant] 保有なし", [
+            {"type": "section", "text": {"type": "mrkdwn", "text": ":white_circle: 保有なし"}}
+        ]
+    if len(items) == 1:
+        ticker, days_held, current_close, trailing_stop = items[0]
+        return format_hold_status(ticker, days_held, current_close, trailing_stop)
+
+    tickers = ", ".join(t for t, _, _, _ in items)
+    text = f"[HOLD x{len(items)}] {tickers}"
+
+    fields = []
+    for ticker, days_held, current_close, trailing_stop in items:
+        fields.append({"type": "mrkdwn", "text": (
+            f"*{ticker}* ({days_held}/5日)\n"
+            f"現在値: ¥{int(current_close)}\n"
+            f"トレーリング: ¥{int(trailing_stop)}"
+        )})
+
+    blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": f":briefcase: 保有銘柄 × {len(items)}"},
+        },
+        {"type": "section", "fields": fields},
+    ]
+    return text, blocks

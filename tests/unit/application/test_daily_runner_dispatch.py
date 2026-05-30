@@ -219,3 +219,99 @@ class TestDispatchOtherStates:
         )
         runner._dispatch(portfolio, "run1")
         runner._settling.run.assert_called_once_with(portfolio, "run1")
+
+
+# ── Multi-pending confirmation (2026-05-30) ───────────────────────────────────
+
+def _make_signal_for(ticker: str, generated_at: datetime | None = None) -> Signal:
+    return Signal(
+        ticker=ticker,
+        reference_price=Decimal("500"),
+        shares=100,
+        cancel_above_price=Decimal("510"),
+        stop_loss_price=Decimal("487"),
+        rsi=35.0,
+        reason="test",
+        generated_at=generated_at or NOW,
+    )
+
+
+def _make_pending_for(
+    ticker: str,
+    status: ExecutionStatus = ExecutionStatus.PENDING,
+    generated_at: datetime | None = None,
+    actual_price: float | None = None,
+    actual_shares: int | None = None,
+) -> PendingSignal:
+    return PendingSignal(
+        signal=_make_signal_for(ticker, generated_at),
+        execution_status=status,
+        actual_entry_price=Decimal(str(actual_price)) if actual_price else None,
+        actual_shares=actual_shares,
+    )
+
+
+class TestMultiPendingConfirmation:
+    def _runner_with_pendings(self, pendings: tuple):
+        runner, state_repo = _make_runner(portfolio_state=SystemState.SIGNAL_SENT)
+        # Override the multi-load to return our prepared tuple
+        state_repo.load_pending_signals.return_value = pendings
+        return runner, state_repo
+
+    def test_two_filled_signals_both_confirmed(self):
+        """Both PendingSignals are FILLED → both positions appended → HOLDING."""
+        pendings = (
+            _make_pending_for("A.T", status=ExecutionStatus.FILLED,
+                              actual_price=500.0, actual_shares=100),
+            _make_pending_for("B.T", status=ExecutionStatus.FILLED,
+                              actual_price=600.0, actual_shares=100),
+        )
+        runner, _ = self._runner_with_pendings(pendings)
+        portfolio = PortfolioState(
+            state=SystemState.SIGNAL_SENT,
+            cash_jpy=Decimal("150000"),
+        )
+        result = runner._dispatch(portfolio, "run1")
+        assert result.state == SystemState.HOLDING
+        assert {p.ticker for p in result.positions} == {"A.T", "B.T"}
+        # Cash decreased by both fills: 100*500 + 100*600 = 110000
+        assert result.cash_jpy == Decimal("40000")
+
+    def test_one_filled_one_pending_keeps_partial(self):
+        """One FILLED + one same-day PENDING → HOLDING + remaining pending kept."""
+        pendings = (
+            _make_pending_for("A.T", status=ExecutionStatus.FILLED,
+                              actual_price=500.0, actual_shares=100),
+            _make_pending_for("B.T", status=ExecutionStatus.PENDING,
+                              generated_at=NOW),  # same day
+        )
+        runner, _ = self._runner_with_pendings(pendings)
+        portfolio = PortfolioState(
+            state=SystemState.SIGNAL_SENT,
+            cash_jpy=Decimal("200000"),
+        )
+        result = runner._dispatch(portfolio, "run1")
+        assert result.state == SystemState.HOLDING
+        assert len(result.positions) == 1
+        assert result.positions[0].ticker == "A.T"
+        # B.T still pending (kept for operator)
+        assert len(result.pending_signals) == 1
+        assert result.pending_signals[0].signal.ticker == "B.T"
+
+    def test_mixed_cancelled_and_filled(self):
+        """One CANCELLED + one FILLED → HOLDING with only the filled position."""
+        pendings = (
+            _make_pending_for("A.T", status=ExecutionStatus.CANCELLED),
+            _make_pending_for("B.T", status=ExecutionStatus.FILLED,
+                              actual_price=500.0, actual_shares=100),
+        )
+        runner, _ = self._runner_with_pendings(pendings)
+        portfolio = PortfolioState(
+            state=SystemState.SIGNAL_SENT,
+            cash_jpy=Decimal("100000"),
+        )
+        result = runner._dispatch(portfolio, "run1")
+        assert result.state == SystemState.HOLDING
+        assert {p.ticker for p in result.positions} == {"B.T"}
+        # Cancelled signal is dropped (not kept as pending)
+        assert result.pending_signals == ()

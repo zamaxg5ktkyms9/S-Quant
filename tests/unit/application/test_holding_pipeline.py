@@ -208,6 +208,105 @@ class TestHoldingPipelineHold:
         if result.state == SystemState.HOLDING and result.position:
             assert result.position.highest_price_since_entry >= Decimal("520")
 
+
+# ── Multi-position tests (2026-05-30) ──────────────────────────────────────
+
+def _make_position_for(ticker: str, entry_price: float = 500.0,
+                       entry_date: date = date(2026, 5, 8)) -> Position:
+    ep = Decimal(str(entry_price))
+    sl = ep * Decimal("0.975")
+    return Position(
+        ticker=ticker,
+        shares=100,
+        entry_price=ep,
+        intended_entry_price=ep,
+        entry_date=entry_date,
+        stop_loss_price=sl,
+        trailing_stop_price=sl,
+        highest_price_since_entry=ep,
+        time_stop_date=date(2026, 5, 15),
+    )
+
+
+class TestHoldingPipelineMultiPosition:
+    def _make_pipeline_with_per_ticker(self, prices: dict[str, float]):
+        """Build a pipeline whose market_data returns a different close for each ticker."""
+        market_data = MagicMock()
+
+        def _fetch(tickers, start, end):
+            return _make_ohlcv_df(close_price=prices[tickers[0]])
+        market_data.fetch_ohlcv_full.side_effect = _fetch
+
+        state_repo = MagicMock()
+        state_repo.load_circuit_breaker.return_value = CircuitBreakerStatus(
+            is_tripped=False, cumulative_loss_jpy=Decimal("0"), tripped_at=None
+        )
+        notifier = MagicMock()
+        clock = MagicMock()
+        clock.today_jst.return_value = TODAY
+        clock.now_jst.return_value = NOW
+        pipeline = HoldingPipeline(
+            state_repo=state_repo,
+            market_data=market_data,
+            notifier=notifier,
+            validator=DataValidator(),
+            clock=clock,
+            settings=Settings(_env_file=None),  # type: ignore[call-arg]
+        )
+        return pipeline, state_repo, notifier
+
+    def test_two_positions_both_hold(self):
+        """Both stocks stay in range: both positions are kept, state stays HOLDING."""
+        pipeline, _, _ = self._make_pipeline_with_per_ticker({
+            "A.T": 510.0, "B.T": 510.0,
+        })
+        portfolio = PortfolioState(
+            state=SystemState.HOLDING,
+            cash_jpy=Decimal("0"),
+            positions=(_make_position_for("A.T"), _make_position_for("B.T")),
+        )
+        result = pipeline.run(portfolio, "run1")
+        assert result.state == SystemState.HOLDING
+        assert len(result.positions) == 2
+        assert {p.ticker for p in result.positions} == {"A.T", "B.T"}
+
+    def test_one_exits_one_holds(self):
+        """A.T drops to 480 (stop-loss); B.T stays at 510 (hold).
+
+        After processing both, only B.T remains and there should be one
+        settle_date pending for the exited A.T.
+        """
+        pipeline, _, _ = self._make_pipeline_with_per_ticker({
+            "A.T": 480.0, "B.T": 510.0,
+        })
+        portfolio = PortfolioState(
+            state=SystemState.HOLDING,
+            cash_jpy=Decimal("0"),
+            positions=(_make_position_for("A.T"), _make_position_for("B.T")),
+        )
+        result = pipeline.run(portfolio, "run1")
+        assert result.state == SystemState.HOLDING  # B.T still held
+        assert len(result.positions) == 1
+        assert result.positions[0].ticker == "B.T"
+        assert len(result.settle_dates) == 1
+        # Cash increased by A.T proceeds: 480 * 100 = 48000
+        assert result.cash_jpy >= Decimal("48000")
+
+    def test_both_exit_transitions_to_settling(self):
+        """Both stop out → no positions left → SETTLING with two settle_dates."""
+        pipeline, _, _ = self._make_pipeline_with_per_ticker({
+            "A.T": 470.0, "B.T": 470.0,
+        })
+        portfolio = PortfolioState(
+            state=SystemState.HOLDING,
+            cash_jpy=Decimal("0"),
+            positions=(_make_position_for("A.T"), _make_position_for("B.T")),
+        )
+        result = pipeline.run(portfolio, "run1")
+        assert result.state == SystemState.SETTLING
+        assert result.positions == ()
+        assert len(result.settle_dates) == 2
+
     def test_dry_run_skips_repo_save(self):
         import os
         os.environ["DRY_RUN"] = "true"

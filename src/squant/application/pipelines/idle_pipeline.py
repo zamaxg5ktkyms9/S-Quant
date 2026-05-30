@@ -13,7 +13,11 @@ from squant.domain.quantity_calculator import (
 )
 from squant.infrastructure.data_validator import DataValidator, Severity
 from squant.infrastructure.interfaces import IClock, IMarketDataClient, INotifier, IStateRepository
-from squant.presentation.slack_formatter import format_buy_signal, format_no_signal
+from squant.presentation.slack_formatter import (
+    format_buy_signal,
+    format_buy_signals_summary,
+    format_no_signal,
+)
 from squant.utils.jst import add_trading_days
 from squant.utils.logging import get_logger
 
@@ -208,13 +212,16 @@ class IdlePipeline:
                 generated_at=self._clock.now_jst(),
             )
             new_pendings.append(PendingSignal(signal=signal))
-            text, blocks = format_buy_signal(signal)
-            self._notifier.send(text, blocks)
-            logger.info(f"BUY signal sent: {signal.ticker} ×{signal.shares}")
+            logger.info(f"BUY signal queued: {signal.ticker} ×{signal.shares}")
 
         if not new_pendings:
             logger.info("No pending signals generated (all skipped)")
             return portfolio
+
+        # Single combined Slack notification for all queued signals (no spam)
+        signals_for_slack = [p.signal for p in new_pendings]
+        text, blocks = format_buy_signals_summary(signals_for_slack)
+        self._notifier.send(text, blocks)
 
         # Merge with any existing pending signals (e.g. from yesterday awaiting fill)
         all_pendings = portfolio.pending_signals + tuple(new_pendings)
