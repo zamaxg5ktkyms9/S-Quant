@@ -11,9 +11,7 @@ from squant.config.constants import (
     MA_LONG,
     MA_MID,
     MA_TREND_LOOKBACK,
-    RSI_BUY_UPPER,
     VOLUME_SURGE_MULTIPLIER,
-    VOLUME_SURGE_WINDOW,
 )
 from squant.domain.signal_engine import detect_signals, detect_signals_ma_cross
 

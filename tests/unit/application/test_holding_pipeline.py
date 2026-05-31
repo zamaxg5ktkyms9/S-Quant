@@ -4,13 +4,11 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-import numpy as np
 import pandas as pd
-import pytest
 
 from squant.application.pipelines.holding_pipeline import HoldingPipeline
 from squant.config.settings import Settings
-from squant.domain.enums import ExitReason, SystemState
+from squant.domain.enums import SystemState
 from squant.domain.models import CircuitBreakerStatus, PortfolioState, Position
 from squant.infrastructure.data_validator import DataValidator
 

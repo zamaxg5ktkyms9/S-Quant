@@ -1,9 +1,7 @@
 """Tests for circuit breaker logic."""
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-
-import pytest
 
 from squant.domain.circuit_breaker import is_tripped, update_after_trade
 from squant.domain.enums import ExitReason, OrderSide

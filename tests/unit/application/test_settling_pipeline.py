@@ -4,8 +4,6 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-import pytest
-
 from squant.application.pipelines.settling_pipeline import SettlingPipeline
 from squant.config.settings import Settings
 from squant.domain.enums import SystemState

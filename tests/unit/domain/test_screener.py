@@ -1,7 +1,6 @@
 """Tests for screener fundamental filters."""
 
 from datetime import date
-from decimal import Decimal
 
 import pandas as pd
 import pytest

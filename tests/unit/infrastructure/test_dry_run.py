@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from squant.infrastructure.slack_notifier import SlackNotifier
 
 _WEBHOOK = "https://hooks.slack.com/services/TEST"

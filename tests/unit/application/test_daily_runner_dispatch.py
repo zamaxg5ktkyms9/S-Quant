@@ -2,9 +2,7 @@
 
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from squant.application.daily_runner import DailyRunner
 from squant.config.settings import Settings

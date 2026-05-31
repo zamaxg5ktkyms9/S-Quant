@@ -1,6 +1,6 @@
 """Shared fixtures for all tests."""
 
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import numpy as np
@@ -58,10 +58,8 @@ def close_series_bullish() -> pd.Series:
     n = 100
     prices = [500.0]
     for i in range(n - 1):
-        if i < 70:
-            change = rng.normal(0.003, 0.008)   # uptrend
-        else:
-            change = rng.normal(-0.008, 0.008)  # pullback
+        # uptrend for first 70 bars, then pullback
+        change = rng.normal(0.003, 0.008) if i < 70 else rng.normal(-0.008, 0.008)
         prices.append(prices[-1] * (1 + change))
     idx = pd.date_range(end="2026-05-11", periods=n, freq="B")
     return pd.Series(prices, index=idx)

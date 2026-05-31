@@ -2,8 +2,6 @@
 
 from datetime import date
 
-import pytest
-
 from squant.infrastructure.data_validator import DataValidator, Severity
 from tests.fixtures import build_close_series, build_volume_series, expected_validation
 

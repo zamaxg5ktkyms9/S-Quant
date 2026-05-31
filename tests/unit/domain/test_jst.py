@@ -10,7 +10,6 @@ from squant.utils.jst import (
     count_trading_days,
     is_settlement_unlocked,
     is_tse_trading_day,
-    next_trading_day,
 )
 
 

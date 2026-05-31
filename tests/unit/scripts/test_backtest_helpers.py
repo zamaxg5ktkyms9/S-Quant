@@ -1,7 +1,6 @@
 """Unit tests for backtest helper functions."""
 
 import sys
-from decimal import Decimal
 
 sys.path.insert(0, "src")
 

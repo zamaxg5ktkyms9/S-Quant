@@ -3,8 +3,6 @@
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
-import pytest
-
 from squant.application.daily_runner import DailyRunner
 from squant.config.settings import Settings
 

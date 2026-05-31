@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from squant.domain.indicators import atr, rsi, rolling_std, sma, volume_surge_ratio
+from squant.domain.indicators import rolling_std, rsi, sma, volume_surge_ratio
 
 
 def make_series(values: list[float]) -> pd.Series:

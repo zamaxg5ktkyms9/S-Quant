@@ -2,8 +2,6 @@
 
 from decimal import Decimal
 
-import pytest
-
 from squant.domain.models import Candidate
 from squant.domain.ranking import rank
 

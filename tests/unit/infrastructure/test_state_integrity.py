@@ -4,8 +4,6 @@ from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-import pytest
-
 from squant.domain.enums import SystemState
 from squant.domain.models import PortfolioState, Position
 from squant.infrastructure.sheets_repository import (
