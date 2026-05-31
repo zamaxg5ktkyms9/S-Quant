@@ -136,14 +136,16 @@ class NoOpStateRepository:
 
         from squant.domain.enums import SystemState
         from squant.domain.models import PortfolioState
-        return PortfolioState(state=SystemState.IDLE, cash_jpy=Decimal("100000"))
+        return PortfolioState(state=SystemState.IDLE, cash_jpy=Decimal("200000"))
 
     def save_portfolio(self, state): pass
     def append_trade(self, trade): pass
     def save_pending_signal(self, pending): pass
     def load_pending_signal(self): return None
+    def save_pending_signals(self, pendings): pass
+    def load_pending_signals(self): return ()
     def confirm_pending_signal(self, *a, **kw): pass
-    def cancel_pending_signal(self): pass
+    def cancel_pending_signal(self, ticker=None): pass
     def load_circuit_breaker(self):
         from decimal import Decimal
 

@@ -66,14 +66,14 @@ def bootstrap():
 
     repo = SheetsStateRepository(client)
     portfolio = repo.load_portfolio()
-    if portfolio.state == SystemState.IDLE and portfolio.cash_jpy == Decimal("100000"):
+    if portfolio.state == SystemState.IDLE and portfolio.cash_jpy == Decimal("200000"):
         print("  — portfolio: already initialized")
     else:
         repo.save_portfolio(PortfolioState(
             state=SystemState.IDLE,
-            cash_jpy=Decimal("100000"),
+            cash_jpy=Decimal("200000"),
         ))
-        print("  ✓ portfolio: initialized with IDLE / ¥100,000")
+        print("  ✓ portfolio: initialized with IDLE / ¥200,000 (Phase 1, C strategy)")
 
     # Initialize circuit breaker
     from squant.domain.models import CircuitBreakerStatus
