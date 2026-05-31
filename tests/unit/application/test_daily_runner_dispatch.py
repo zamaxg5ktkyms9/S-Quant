@@ -74,7 +74,11 @@ def _make_runner(
     clock.today_jst.return_value = TODAY
     clock.now_jst.return_value = NOW
 
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        bypass_execution_time_guard=False,
+        bypass_trading_day_check=False,
+    )
 
     idle_pipeline = MagicMock()
     idle_pipeline.run.return_value = PortfolioState(

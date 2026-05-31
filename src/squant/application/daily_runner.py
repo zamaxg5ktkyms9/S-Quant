@@ -57,27 +57,40 @@ class DailyRunner:
 
         try:
             # 20:00 JST execution guard — GitHub Actions runs at 20:15 JST; local runs before
-            # market data is available are rejected here.
+            # market data is available are rejected here. Bypass available via Settings for
+            # workflow_dispatch testing (env BYPASS_EXECUTION_TIME_GUARD=true).
             now = self._clock.now_jst()
             if now.hour < EXECUTION_GUARD_HOUR_JST:
-                logger.info(
-                    f"Execution time guard: {now.strftime('%H:%M')} JST "
-                    f"< {EXECUTION_GUARD_HOUR_JST}:00 JST — skipping"
-                )
-                return RunResult(
-                    success=True, run_id=run_id,
-                    state_before=SystemState.IDLE, state_after=None,
-                    note=f"execution_time_guard: {now.strftime('%H:%M')} JST",
-                )
+                if self._settings.bypass_execution_time_guard:
+                    logger.warning(
+                        f"execution_time_guard bypassed via Settings "
+                        f"(now={now.strftime('%H:%M')} JST, guard={EXECUTION_GUARD_HOUR_JST}:00)"
+                    )
+                else:
+                    logger.info(
+                        f"Execution time guard: {now.strftime('%H:%M')} JST "
+                        f"< {EXECUTION_GUARD_HOUR_JST}:00 JST — skipping"
+                    )
+                    return RunResult(
+                        success=True, run_id=run_id,
+                        state_before=SystemState.IDLE, state_after=None,
+                        note=f"execution_time_guard: {now.strftime('%H:%M')} JST",
+                    )
 
-            # Skip on non-trading days (handles holidays, weekends)
+            # Skip on non-trading days (handles holidays, weekends). Bypass available via
+            # Settings for workflow_dispatch testing (env BYPASS_TRADING_DAY_CHECK=true).
             if not is_tse_trading_day(today):
-                logger.info(f"{today} is not a TSE trading day — skipping")
-                return RunResult(
-                    success=True, run_id=run_id,
-                    state_before=SystemState.IDLE, state_after=None,
-                    note="non-trading day",
-                )
+                if self._settings.bypass_trading_day_check:
+                    logger.warning(
+                        f"trading_day_check bypassed via Settings (today={today})"
+                    )
+                else:
+                    logger.info(f"{today} is not a TSE trading day — skipping")
+                    return RunResult(
+                        success=True, run_id=run_id,
+                        state_before=SystemState.IDLE, state_after=None,
+                        note="non-trading day",
+                    )
 
             # Idempotency guard
             if self._repo.has_run_today(today):

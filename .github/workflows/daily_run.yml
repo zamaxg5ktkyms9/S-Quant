@@ -12,6 +12,16 @@ on:
         required: false
         default: "true"
         type: boolean
+      bypass_execution_time_guard:
+        description: "テスト: 20:00 JST ガード無視（本番 cron では false 固定）"
+        required: false
+        default: "false"
+        type: boolean
+      bypass_trading_day_check:
+        description: "テスト: TSE 営業日チェック無視（本番 cron では false 固定）"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   trade:
@@ -23,6 +33,8 @@ jobs:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      BYPASS_EXECUTION_TIME_GUARD: ${{ github.event.inputs.bypass_execution_time_guard || 'false' }}
+      BYPASS_TRADING_DAY_CHECK: ${{ github.event.inputs.bypass_trading_day_check || 'false' }}
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
