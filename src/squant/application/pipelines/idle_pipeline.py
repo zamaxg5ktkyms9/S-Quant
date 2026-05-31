@@ -68,8 +68,14 @@ class IdlePipeline:
             self._universe, start, today, on_progress=_ohlcv_progress
         )
 
-        # System-level freshness check
-        self._validator.assert_universe_fresh(adj_close, today)
+        # System-level freshness check — skipped when bypass_trading_day_check is on,
+        # because a non-trading day legitimately has no fresh OHLCV for `today`.
+        if self._settings.bypass_trading_day_check:
+            logger.warning(
+                "assert_universe_fresh skipped because bypass_trading_day_check is on"
+            )
+        else:
+            self._validator.assert_universe_fresh(adj_close, today)
 
         # Per-ticker validation
         valid_tickers: list[str] = []

@@ -253,6 +253,38 @@ class TestIdlePipelineSlotsAndState:
         assert "A.T" not in passed
         assert set(passed) == {"B.T", "C.T"}
 
+    def test_freshness_check_skipped_when_bypass_trading_day(self, monkeypatch):
+        """bypass_trading_day_check=True → assert_universe_fresh is NOT called.
+
+        Reason: a non-trading day legitimately has no fresh OHLCV for `today`,
+        so the third built-in skip (DataValidator.assert_universe_fresh) must
+        be lifted in tandem with the trading-day guard. Without this, a
+        weekend workflow_dispatch with both bypasses on still aborts on
+        "Only 0/N tickers have fresh data".
+        """
+        monkeypatch.setenv("BYPASS_TRADING_DAY_CHECK", "true")
+        validator = _ok_validator()
+        pipeline, _, _, _ = _setup(
+            monkeypatch,
+            universe=("A.T", "B.T"),
+            screen_tickers=[],  # short-circuit after the freshness step
+            validator=validator,
+        )
+        pipeline.run(_idle_portfolio(), "run1")
+        validator.assert_universe_fresh.assert_not_called()
+
+    def test_freshness_check_runs_when_bypass_off(self, monkeypatch):
+        """Regression: with bypass off, assert_universe_fresh is still called."""
+        validator = _ok_validator()
+        pipeline, _, _, _ = _setup(
+            monkeypatch,
+            universe=("A.T", "B.T"),
+            screen_tickers=[],
+            validator=validator,
+        )
+        pipeline.run(_idle_portfolio(), "run1")
+        validator.assert_universe_fresh.assert_called_once()
+
 
 # ── B. Dynamic budget + multiple pendings (Decimal path) ─────────────────────
 
