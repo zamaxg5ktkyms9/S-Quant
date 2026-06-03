@@ -62,6 +62,10 @@ class TestExecutionTimeGuard:
         assert result.success is True
         assert "execution_time_guard" in result.note
         runner._repo.has_run_today.assert_not_called()
+        # Skip must be visible to the operator (Slack ping) so they can
+        # distinguish "guard fired" from "cron did not run at all".
+        runner._notifier.send.assert_called_once()
+        assert "skip" in runner._notifier.send.call_args[0][0]
 
     def test_skips_at_midnight(self):
         runner = _make_runner(hour=0)
@@ -123,3 +127,6 @@ class TestGuardBypass:
         result = runner.run()
         assert result.note == "non-trading day"
         runner._repo.has_run_today.assert_not_called()
+        # Same Slack visibility for the non-trading-day skip path.
+        runner._notifier.send.assert_called_once()
+        assert "skip" in runner._notifier.send.call_args[0][0]

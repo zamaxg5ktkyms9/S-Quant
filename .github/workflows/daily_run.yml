@@ -1,9 +1,13 @@
 name: Daily Trading Run
 
 on:
-  # 20:15 JST = 11:15 UTC (avoid top-of-hour congestion)
+  # 20:30 JST = 11:30 UTC. The previous "15 11" slot suffered repeated
+  # multi-hour GitHub schedule lag (6/1 cron skipped entirely, 6/2 cron ran
+  # 4h late at 00:11 JST on 6/3) because */15 minute slots are highly
+  # contested. "30 11" is less congested and still leaves enough headroom
+  # before SBI's next-day open at 09:00 JST.
   schedule:
-    - cron: "15 11 * * 1-5"
+    - cron: "30 11 * * 1-5"
   # Manual trigger for testing
   workflow_dispatch:
     inputs:

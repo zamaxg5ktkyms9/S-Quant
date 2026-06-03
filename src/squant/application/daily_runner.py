@@ -56,9 +56,12 @@ class DailyRunner:
         state_before: SystemState | None = None
 
         try:
-            # 20:00 JST execution guard — GitHub Actions runs at 20:15 JST; local runs before
+            # 20:00 JST execution guard — GitHub Actions runs at 20:30 JST; local runs before
             # market data is available are rejected here. Bypass available via Settings for
             # workflow_dispatch testing (env BYPASS_EXECUTION_TIME_GUARD=true).
+            # On skip we send a one-liner Slack so the operator can tell "the job ran and
+            # the guard fired" from "the job did not run at all" — the latter is invisible
+            # otherwise (GitHub schedule lag has actually delayed runs by 4 hours).
             now = self._clock.now_jst()
             if now.hour < EXECUTION_GUARD_HOUR_JST:
                 if self._settings.bypass_execution_time_guard:
@@ -70,6 +73,11 @@ class DailyRunner:
                     logger.info(
                         f"Execution time guard: {now.strftime('%H:%M')} JST "
                         f"< {EXECUTION_GUARD_HOUR_JST}:00 JST — skipping"
+                    )
+                    self._notifier.send(
+                        f"[S-Quant] ⏰ skip: {now.strftime('%H:%M')} JST "
+                        f"< {EXECUTION_GUARD_HOUR_JST}:00 ガード — full run には "
+                        "bypass_execution_time_guard=true で workflow_dispatch を"
                     )
                     return RunResult(
                         success=True, run_id=run_id,
@@ -86,6 +94,10 @@ class DailyRunner:
                     )
                 else:
                     logger.info(f"{today} is not a TSE trading day — skipping")
+                    self._notifier.send(
+                        f"[S-Quant] 📅 skip: {today} は TSE 非営業日 — "
+                        "土日/祝日テストには bypass_trading_day_check=true を"
+                    )
                     return RunResult(
                         success=True, run_id=run_id,
                         state_before=SystemState.IDLE, state_after=None,
