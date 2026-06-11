@@ -24,6 +24,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PYTHON_BIN = REPO_ROOT / ".venv" / "bin" / "python"
 BACKTEST_SCRIPT = REPO_ROOT / "scripts" / "backtest.py"
 
+# in-process bridge to backtest.py: re-uses ~33 MB pickled OHLCV across the
+# whole grid instead of paying for one subprocess + pickle reload per cell.
+sys.path.insert(0, str(REPO_ROOT / "src"))
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from backtest import load_cache as _load_cache_for_backtest  # noqa: E402
+from backtest import run_one_backtest  # noqa: E402
+
 # パラメータ Grid（180通り = 5×3×4×3）
 GRID = {
     "target_profit": [0.02, 0.03, 0.04, 0.05, 0.06],
@@ -71,6 +78,45 @@ def run_one(
             except json.JSONDecodeError:
                 return None
     return None
+
+
+def run_one_inprocess(
+    params: dict, start: str, end: str, data: dict,
+    *, budget: int = 200_000, max_positions: int = 2,
+    signal: str = "ma_cross",
+) -> dict | None:
+    """In-process equivalent of ``run_one``.
+
+    Uses the pre-loaded ``data`` dict (from ``backtest.load_cache``) and
+    runs the simulation directly — no subprocess, no pickle reload. The
+    caller is responsible for loading ``data`` once for the whole grid.
+
+    Returns the same metrics shape as the subprocess path so downstream
+    code (walk_forward, sort, reporting) keeps working unchanged.
+    """
+    from datetime import date as _date
+    try:
+        return run_one_backtest(
+            _date.fromisoformat(start), _date.fromisoformat(end), data,
+            budget=budget, max_positions=max_positions,
+            signal_strategy=signal,
+            target_profit=params.get("target_profit"),
+            atr_mult=params.get("atr_mult"),
+            rsi_upper=params.get("rsi_upper"),
+            rsi_lower=params.get("rsi_lower"),
+            time_stop=params.get("time_stop"),
+        )
+    except Exception:  # match subprocess path which returns None on error
+        return None
+
+
+def load_cache_for_grid(start: str, end: str, cache_dir: str = ".backtest_cache") -> dict:
+    """Load the OHLCV/fundamentals cache once for an in-process grid run."""
+    from datetime import date as _date
+    return _load_cache_for_backtest(
+        _date.fromisoformat(start), _date.fromisoformat(end),
+        cache_dir=Path(cache_dir),
+    )
 
 
 def _runner(args_tuple):

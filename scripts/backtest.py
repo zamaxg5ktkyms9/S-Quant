@@ -479,23 +479,43 @@ def _print_report(
     print(f"\n最終キャッシュ : ¥{int(state.cash):,}  (初期 ¥{int(state.initial_capital):,})")
 
 
+# Pristine references captured the first time _apply_param_overrides runs.
+# Without this, repeated in-process calls would wrap an already-patched
+# compute_take_profit_price layer after layer (memory leak + accumulating
+# closures). Subprocess execution was fine because each subprocess starts
+# fresh; only in-process grid loops needed this guard.
+_ORIG_COMPUTE_TAKE_PROFIT_PRICE = None
+
+
 def _apply_param_overrides(args: argparse.Namespace) -> None:
     """CLI 引数でパラメータを上書きする（grid search 用）。
 
     constants.py のモジュール属性と、各ドメインモジュールが import 済みの定数を
     両方書き換える必要がある（from X import Y はローカルバインディングのため）。
+
+    Idempotent: safe to call repeatedly in the same process (used by the
+    in-process grid search). Each call resets the module attrs to the
+    pristine originals, then re-applies whatever overrides args carries.
     """
+    global _ORIG_COMPUTE_TAKE_PROFIT_PRICE
     import squant.config.constants as C
     import squant.domain.position_manager as PM
     import squant.domain.quantity_calculator as QC
     import squant.domain.signal_engine as SE
+
+    # Snapshot the pristine compute_take_profit_price on the very first call.
+    if _ORIG_COMPUTE_TAKE_PROFIT_PRICE is None:
+        _ORIG_COMPUTE_TAKE_PROFIT_PRICE = QC.compute_take_profit_price
+    # Always restore from the pristine before applying this call's overrides.
+    QC.compute_take_profit_price = _ORIG_COMPUTE_TAKE_PROFIT_PRICE
+    PM.compute_take_profit_price = _ORIG_COMPUTE_TAKE_PROFIT_PRICE
 
     if args.target_profit is not None:
         rate = Decimal(str(args.target_profit))
         C.TARGET_PROFIT_RATE = rate
         QC.TARGET_PROFIT_RATE = rate
         # compute_take_profit_price の default 引数も差し替え
-        _orig = QC.compute_take_profit_price
+        _orig = _ORIG_COMPUTE_TAKE_PROFIT_PRICE
         def _patched_tp(entry_price, target_net_rate=rate, spread_rate=Decimal("0")):
             return _orig(entry_price, target_net_rate, spread_rate)
         QC.compute_take_profit_price = _patched_tp
@@ -661,6 +681,163 @@ def _state_to_metrics(state: BacktestState, start: date, end: date) -> dict:
         # 出口分布
         "by_reason": by_reason,
     }
+
+
+# ── In-process helpers (re-used by grid_search / walk_forward) ────────────────
+
+
+def _find_compatible_cache_path(
+    fetch_start: date, end: date, cache_dir: Path
+) -> Path | None:
+    """Return the smallest pickle file in cache_dir whose date range covers
+    [fetch_start, end], or None if no such file exists.
+    """
+    if not cache_dir.exists():
+        return None
+    candidates: list[tuple[Path, date, date]] = []
+    for p in cache_dir.glob("data_*.pkl"):
+        stem = p.stem.removeprefix("data_")
+        try:
+            cs_str, ce_str = stem.split("_")
+            cs = date.fromisoformat(cs_str)
+            ce = date.fromisoformat(ce_str)
+        except (ValueError, IndexError):
+            continue
+        if cs <= fetch_start and ce >= end:
+            candidates.append((p, cs, ce))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: (x[2] - x[1]).days)
+    return candidates[0][0]
+
+
+def load_cache(
+    start: date, end: date,
+    cache_dir: Path = Path(".backtest_cache"),
+) -> dict:
+    """Load pickled OHLCV/fundamentals cache covering [start-180d, end].
+
+    Returns a dict ready to feed into ``run_one_backtest``:
+        {adj_close, volume, full_cache, fundamentals, bps_map}
+
+    Raises FileNotFoundError if no compatible cache exists — callers should
+    fall back to running ``backtest.py`` once with full fetch first.
+    """
+    fetch_start = start - timedelta(days=180)
+    path = _find_compatible_cache_path(fetch_start, end, cache_dir)
+    if path is None:
+        raise FileNotFoundError(
+            f"No compatible backtest cache for {fetch_start}..{end} in {cache_dir}. "
+            "Run `python scripts/backtest.py --start ... --end ...` once to populate."
+        )
+    with path.open("rb") as f:
+        cached = pickle.load(f)
+    bps_map = _build_bps_map(cached["fundamentals"], cached["adj_close"])
+    return {
+        "adj_close": cached["adj_close"],
+        "volume": cached["volume"],
+        "full_cache": cached["full_cache"],
+        "fundamentals": cached["fundamentals"],
+        "bps_map": bps_map,
+    }
+
+
+def run_one_backtest(
+    start: date, end: date, data: dict,
+    *,
+    budget: int = 200_000,
+    max_positions: int = DEFAULT_MAX_POSITIONS,
+    signal_strategy: str = "ma_cross",
+    target_profit: float | None = None,
+    atr_mult: float | None = None,
+    rsi_upper: float | None = None,
+    rsi_lower: float | None = None,
+    time_stop: int | None = None,
+    universe: list[str] | None = None,
+) -> dict:
+    """Execute one in-process backtest cycle and return its metrics dict.
+
+    Designed for the grid search / walk-forward in-process path: subprocess
+    startup, pickle reload, and stdout parsing are all skipped — only the
+    actual simulation runs. Typical speedup is ~10-20x over the
+    subprocess-based path.
+    """
+    # 1) Apply parameter overrides idempotently (reset → re-patch).
+    args = argparse.Namespace(
+        target_profit=target_profit,
+        atr_mult=atr_mult,
+        rsi_upper=rsi_upper,
+        rsi_lower=rsi_lower,
+        time_stop=time_stop,
+    )
+    _apply_param_overrides(args)
+
+    # 2) Build Settings and trading-day list.
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    settings.budget_jpy = Decimal(str(budget))
+    if universe is None:
+        universe = load_universe()
+    adj_close_full = data["adj_close"]
+    volume_full = data["volume"]
+    full_cache = data["full_cache"]
+    fund_base = data["fundamentals"]
+    bps_map = data["bps_map"]
+    trading_days = sorted(
+        d.date() for d in pd.bdate_range(start, end) if is_tse_trading_day(d.date())
+    )
+
+    state = BacktestState(
+        cash=Decimal(str(budget)),
+        initial_capital=Decimal(str(budget)),
+        max_positions=max_positions,
+    )
+    signal_func = (
+        signal_engine.detect_signals_ma_cross
+        if signal_strategy == "ma_cross"
+        else signal_engine.detect_signals
+    )
+
+    # 3) Run the main loop with stdout suppressed (grid search quiet mode).
+    import contextlib
+    import io as _io
+    with contextlib.redirect_stdout(_io.StringIO()):
+        for today in trading_days:
+            updated: list[Position] = []
+            for pos in state.positions:
+                result = _process_exit(state, pos, today, full_cache)
+                if result is not None:
+                    updated.append(result)
+            state.positions = updated
+
+            pending_today = state.pending_entries
+            state.pending_entries = []
+            for pending in pending_today:
+                if state.open_slots <= 0:
+                    break
+                _process_pending_entry(state, pending, today, full_cache, settings)
+
+            if state.open_slots > 0:
+                _process_signal_scan(
+                    state, today,
+                    adj_close_full, volume_full,
+                    fund_base, bps_map,
+                    universe,
+                    open_slots=state.open_slots,
+                    signal_func=signal_func,
+                    verbose=False,
+                )
+
+    metrics = _state_to_metrics(state, start, end)
+    metrics["params"] = {
+        "target_profit": target_profit,
+        "atr_mult": atr_mult,
+        "rsi_upper": rsi_upper,
+        "rsi_lower": rsi_lower,
+        "time_stop": time_stop,
+        "max_positions": max_positions,
+        "signal": signal_strategy,
+    }
+    return metrics
 
 
 def main() -> None:
