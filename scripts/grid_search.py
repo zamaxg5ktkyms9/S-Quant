@@ -80,34 +80,51 @@ def run_one(
     return None
 
 
-def run_one_inprocess(
-    params: dict, start: str, end: str, data: dict,
-    *, budget: int = 200_000, max_positions: int = 2,
-    signal: str = "ma_cross",
-) -> dict | None:
-    """In-process equivalent of ``run_one``.
+class InProcessGridRunner:
+    """One in-process grid / walk-forward run sharing a single loaded cache.
 
-    Uses the pre-loaded ``data`` dict (from ``backtest.load_cache``) and
-    runs the simulation directly — no subprocess, no pickle reload. The
-    caller is responsible for loading ``data`` once for the whole grid.
-
-    Returns the same metrics shape as the subprocess path so downstream
-    code (walk_forward, sort, reporting) keeps working unchanged.
+    subprocess 経路 (``run_one``) と同じ metrics 形状を返すので、下流の
+    集計・ソート・robust 判定はそのまま動く。``run()`` は
+    ``_apply_param_overrides`` 経由でモジュールレベル定数を書き換えるため
+    スレッド安全ではない — 呼び出しは必ずシリアルにすること。
     """
-    from datetime import date as _date
-    try:
-        return run_one_backtest(
-            _date.fromisoformat(start), _date.fromisoformat(end), data,
-            budget=budget, max_positions=max_positions,
-            signal_strategy=signal,
-            target_profit=params.get("target_profit"),
-            atr_mult=params.get("atr_mult"),
-            rsi_upper=params.get("rsi_upper"),
-            rsi_lower=params.get("rsi_lower"),
-            time_stop=params.get("time_stop"),
-        )
-    except Exception:  # match subprocess path which returns None on error
-        return None
+
+    def __init__(
+        self, data: dict, *,
+        budget: int | None = None, max_positions: int | None = None,
+        signal: str | None = None,
+    ) -> None:
+        self.data = data
+        self.budget = budget
+        self.max_positions = max_positions
+        self.signal = signal
+
+    def run(self, params: dict, start: str, end: str) -> dict | None:
+        from datetime import date as _date
+        kwargs: dict = {}
+        if self.budget is not None:
+            kwargs["budget"] = self.budget
+        if self.max_positions is not None:
+            kwargs["max_positions"] = self.max_positions
+        if self.signal is not None:
+            kwargs["signal_strategy"] = self.signal
+        try:
+            return run_one_backtest(
+                _date.fromisoformat(start), _date.fromisoformat(end), self.data,
+                target_profit=params.get("target_profit"),
+                atr_mult=params.get("atr_mult"),
+                rsi_upper=params.get("rsi_upper"),
+                rsi_lower=params.get("rsi_lower"),
+                time_stop=params.get("time_stop"),
+                **kwargs,
+            )
+        except Exception:
+            # subprocess 経路は None を返す仕様に合わせるが、in-process では
+            # traceback を残さないとデバッグ不能になるため stderr に出す。
+            import traceback
+            print(f"  [inprocess] FAILED: {params}", file=sys.stderr, flush=True)
+            traceback.print_exc(file=sys.stderr)
+            return None
 
 
 def load_cache_for_grid(start: str, end: str, cache_dir: str = ".backtest_cache") -> dict:
@@ -120,22 +137,35 @@ def load_cache_for_grid(start: str, end: str, cache_dir: str = ".backtest_cache"
 
 
 def _runner(args_tuple):
-    params, start, end = args_tuple
-    return params, run_one(params, start, end)
+    params, start, end, budget, max_positions, signal = args_tuple
+    return params, run_one(
+        params, start, end, budget=budget, max_positions=max_positions, signal=signal,
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--start", default="2024-01-04")
     parser.add_argument("--end",   default="2025-12-30")
-    parser.add_argument("--workers", type=int, default=4, help="並列ワーカー数")
+    parser.add_argument("--mode", choices=["inprocess", "subprocess"], default="inprocess",
+                        help="inprocess: キャッシュ1回ロードでシリアル実行（高速・推奨）。"
+                             "subprocess: 旧経路（同値性検証用）")
+    parser.add_argument("--workers", type=int, default=4,
+                        help="並列ワーカー数（subprocess モードのみ。inprocess はシリアル実行）")
     parser.add_argument("--top", type=int, default=20, help="表示する上位件数")
+    parser.add_argument("--budget", type=int, default=None,
+                        help="バックテスト予算（円）。指定しなければ backtest.py のデフォルト")
+    parser.add_argument("--max-positions", type=int, default=None,
+                        help="同時保有銘柄数の上限。指定しなければ backtest.py のデフォルト")
+    parser.add_argument("--signal", choices=["pullback", "ma_cross"], default=None,
+                        help="シグナル種別。指定しなければ backtest.py のデフォルト")
     args = parser.parse_args()
 
     keys = list(GRID.keys())
     combos = [dict(zip(keys, vs)) for vs in itertools.product(*GRID.values())]
     total = len(combos)
-    print(f"Grid search: {total} 組合せ, {args.workers} 並列", flush=True)
+    print(f"Grid search: {total} 組合せ, mode={args.mode}"
+          + (f", {args.workers} 並列" if args.mode == "subprocess" else " (シリアル)"), flush=True)
     print(f"パラメータ: {GRID}", flush=True)
     print()
 
@@ -143,22 +173,42 @@ def main() -> None:
     results: list[dict] = []
     completed = 0
 
-    with ProcessPoolExecutor(max_workers=args.workers) as ex:
-        futures = {ex.submit(_runner, (c, args.start, args.end)): c for c in combos}
-        for fut in as_completed(futures):
-            params, metrics = fut.result()
+    def _report(completed_n: int) -> None:
+        if completed_n % 10 == 0 or completed_n == total:
+            elapsed = time.time() - t0
+            eta = elapsed / completed_n * (total - completed_n)
+            print(f"  [{completed_n}/{total}] elapsed {elapsed:.0f}s  ETA {eta:.0f}s", flush=True)
+
+    if args.mode == "inprocess":
+        data = load_cache_for_grid(args.start, args.end)
+        runner = InProcessGridRunner(
+            data, budget=args.budget, max_positions=args.max_positions, signal=args.signal,
+        )
+        for c in combos:
+            metrics = runner.run(c, args.start, args.end)
             completed += 1
             if metrics is None:
-                print(f"  [{completed}/{total}] FAILED: {params}", flush=True)
+                print(f"  [{completed}/{total}] FAILED: {c}", flush=True)
                 continue
             results.append(metrics)
-            if completed % 10 == 0 or completed == total:
-                elapsed = time.time() - t0
-                eta = elapsed / completed * (total - completed)
-                print(
-                    f"  [{completed}/{total}] elapsed {elapsed:.0f}s  ETA {eta:.0f}s",
-                    flush=True,
-                )
+            _report(completed)
+    else:
+        with ProcessPoolExecutor(max_workers=args.workers) as ex:
+            futures = {
+                ex.submit(
+                    _runner,
+                    (c, args.start, args.end, args.budget, args.max_positions, args.signal),
+                ): c
+                for c in combos
+            }
+            for fut in as_completed(futures):
+                params, metrics = fut.result()
+                completed += 1
+                if metrics is None:
+                    print(f"  [{completed}/{total}] FAILED: {params}", flush=True)
+                    continue
+                results.append(metrics)
+                _report(completed)
 
     if not results:
         print("結果なし。backtest.py のキャッシュやエラーを確認してください。")

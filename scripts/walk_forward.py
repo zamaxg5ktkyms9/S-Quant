@@ -41,7 +41,12 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from grid_search import GRID, run_one  # type: ignore
+from grid_search import (  # type: ignore  # noqa: E402
+    GRID,
+    InProcessGridRunner,
+    load_cache_for_grid,
+    run_one,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -91,11 +96,16 @@ def grid_search_period(
     wall_clock_deadline: float | None = None,
     combos_override: list[dict] | None = None,
     signal: str | None = None,
+    runner: InProcessGridRunner | None = None,
 ) -> list[dict]:
     """指定期間で grid search を実行し、結果リストを返す。
 
-    workers=1 ならシリアル実行（pickle ロード I/O 競合を回避）。
-    workers≥2 なら ProcessPoolExecutor で並列実行。
+    runner が渡されたら in-process シリアル実行（キャッシュ1回ロード、
+    subprocess なし）。workers / subprocess_timeout は無視される。
+
+    runner=None（subprocess 経路）:
+    - workers=1 ならシリアル実行（pickle ロード I/O 競合を回避）
+    - workers≥2 なら ProcessPoolExecutor で並列実行
 
     恒久対策:
     - wall_clock_deadline（monotonic 時刻）を超えたら WallClockExceeded を raise
@@ -107,7 +117,11 @@ def grid_search_period(
         dict(zip(keys, vs)) for vs in itertools.product(*GRID.values())
     ]
     total = len(combos)
-    print(f"  Grid search: {total} 組合せ ({start} 〜 {end}, workers={workers}, timeout={subprocess_timeout}s)", flush=True)
+    mode_desc = (
+        "in-process serial" if runner is not None
+        else f"workers={workers}, timeout={subprocess_timeout}s"
+    )
+    print(f"  Grid search: {total} 組合せ ({start} 〜 {end}, {mode_desc})", flush=True)
     if initial_eta_estimate is not None:
         print(f"    初期 ETA 推定: {initial_eta_estimate:.0f}s "
               f"(警告閾値 {ETA_INFLATION_WARN_RATIO}x, abort 閾値 {ETA_INFLATION_ABORT_RATIO}x)",
@@ -149,7 +163,16 @@ def grid_search_period(
             eta = elapsed / completed_n * (total - completed_n)
             print(f"    {completed_n}/{total}  elapsed {elapsed:.0f}s  ETA {eta:.0f}s", flush=True)
 
-    if workers <= 1:
+    if runner is not None:
+        # in-process シリアル実行（runner はスレッド安全ではない）
+        for c in combos:
+            metrics = runner.run(c, start, end)
+            completed += 1
+            if metrics is not None:
+                results.append(metrics)
+            _check_health(completed)
+            _report_progress(completed)
+    elif workers <= 1:
         # シリアル実行: pickle I/O 競合と subprocess timeout 多発を回避
         for c in combos:
             metrics = run_one(
@@ -199,6 +222,7 @@ def evaluate_window(
     initial_eta_estimate: float | None = None,
     wall_clock_deadline: float | None = None,
     signal: str | None = None,
+    runner: InProcessGridRunner | None = None,
 ) -> dict | None:
     """1窓を評価して IS/OOS メトリクスと robust 判定を返す。失敗時 None。"""
     print(f"\n{'='*80}")
@@ -212,6 +236,7 @@ def evaluate_window(
         initial_eta_estimate=initial_eta_estimate,
         wall_clock_deadline=wall_clock_deadline,
         signal=signal,
+        runner=runner,
     )
     if not is_results:
         print(f"  ❌ Window {label}: IS で結果が得られず")
@@ -239,11 +264,14 @@ def evaluate_window(
     )
 
     print(f"  [{label}-OOS] 固定パラメータで実行", flush=True)
-    oos_metrics = run_one(
-        best_params, oos_start, oos_end,
-        budget=budget, max_positions=max_positions, timeout=subprocess_timeout,
-        signal=signal,
-    )
+    if runner is not None:
+        oos_metrics = runner.run(best_params, oos_start, oos_end)
+    else:
+        oos_metrics = run_one(
+            best_params, oos_start, oos_end,
+            budget=budget, max_positions=max_positions, timeout=subprocess_timeout,
+            signal=signal,
+        )
     if oos_metrics is None:
         print(f"  ❌ Window {label}: OOS バックテスト失敗")
         return None
@@ -325,8 +353,11 @@ def main() -> None:
     parser.add_argument("--is-end",     default="2024-12-30")
     parser.add_argument("--oos-start",  default="2025-01-06")
     parser.add_argument("--oos-end",    default="2025-12-30")
+    parser.add_argument("--mode", choices=["inprocess", "subprocess"], default="inprocess",
+                        help="inprocess: キャッシュ1回ロードでシリアル実行（高速・推奨）。"
+                             "subprocess: 旧経路（同値性検証用）")
     parser.add_argument("--workers", type=int, default=1,
-                        help="並列度（default: 1 = シリアル）。docs/operational_notes.md 参照")
+                        help="並列度（subprocess モードのみ。default: 1 = シリアル）。docs/operational_notes.md 参照")
     parser.add_argument("--budget", type=int, default=None,
                         help="バックテスト予算（円）。指定しなければ backtest.py のデフォルト")
     parser.add_argument("--max-positions", type=int, default=None,
@@ -352,7 +383,26 @@ def main() -> None:
     else:
         windows_def = DEFAULT_WINDOWS
         print(f"Mode: rolling {len(windows_def)} windows (default α案)")
-    print(f"並列度: {args.workers}")
+    print(f"実行経路: {args.mode}")
+    if args.mode == "subprocess":
+        print(f"並列度: {args.workers}")
+
+    runner: InProcessGridRunner | None = None
+    if args.mode == "inprocess":
+        # 全窓（＋ベンチ窓）をカバーする範囲でキャッシュを1回だけロードする
+        periods = list(windows_def) + ([BENCHMARK_WINDOW] if args.benchmark else [])
+        cov_start = min(min(p[0], p[2]) for p in periods)
+        cov_end = max(max(p[1], p[3]) for p in periods)
+        try:
+            data = load_cache_for_grid(cov_start, cov_end)
+        except FileNotFoundError as e:
+            print(f"\n❌ {e}")
+            print("   先に `python scripts/backtest.py --start ... --end ...` で"
+                  "キャッシュを生成するか、--mode subprocess を使ってください。")
+            sys.exit(1)
+        runner = InProcessGridRunner(
+            data, budget=args.budget, max_positions=args.max_positions, signal=args.signal,
+        )
     if args.budget is not None:
         print(f"Budget: ¥{args.budget:,}")
     if args.max_positions is not None:
@@ -380,6 +430,7 @@ def main() -> None:
             subprocess_timeout=args.subprocess_timeout,
             combos_override=bench_combos,
             signal=args.signal,
+            runner=runner,
         )
         bench_elapsed = time.time() - bench_t0
         per_combo = bench_elapsed / max(BENCHMARK_COMBOS, 1)
@@ -411,6 +462,7 @@ def main() -> None:
                 initial_eta_estimate=initial_eta_per_window,
                 wall_clock_deadline=wall_clock_deadline,
                 signal=args.signal,
+                runner=runner,
             )
             if r is None:
                 print(f"⚠ Window {label} スキップ")

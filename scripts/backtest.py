@@ -479,12 +479,12 @@ def _print_report(
     print(f"\n最終キャッシュ : ¥{int(state.cash):,}  (初期 ¥{int(state.initial_capital):,})")
 
 
-# Pristine references captured the first time _apply_param_overrides runs.
-# Without this, repeated in-process calls would wrap an already-patched
-# compute_take_profit_price layer after layer (memory leak + accumulating
-# closures). Subprocess execution was fine because each subprocess starts
-# fresh; only in-process grid loops needed this guard.
-_ORIG_COMPUTE_TAKE_PROFIT_PRICE = None
+# Pristine values captured the first time _apply_param_overrides runs.
+# Repeated in-process calls (grid search / walk-forward) must not inherit the
+# previous cell's overrides, so every call restores ALL tunables from this
+# snapshot before applying its own. Subprocess execution never needed this
+# because each subprocess starts fresh.
+_PRISTINE_PARAMS: dict | None = None
 
 
 def _apply_param_overrides(args: argparse.Namespace) -> None:
@@ -494,28 +494,41 @@ def _apply_param_overrides(args: argparse.Namespace) -> None:
     両方書き換える必要がある（from X import Y はローカルバインディングのため）。
 
     Idempotent: safe to call repeatedly in the same process (used by the
-    in-process grid search). Each call resets the module attrs to the
-    pristine originals, then re-applies whatever overrides args carries.
+    in-process grid search). Each call resets all five tunables (and the
+    patched take-profit function) to the pristine originals, then re-applies
+    whatever overrides args carries. An arg left as None therefore means
+    "use the default", never "keep the previous cell's value".
     """
-    global _ORIG_COMPUTE_TAKE_PROFIT_PRICE
+    global _PRISTINE_PARAMS
     import squant.config.constants as C
     import squant.domain.position_manager as PM
     import squant.domain.quantity_calculator as QC
     import squant.domain.signal_engine as SE
 
-    # Snapshot the pristine compute_take_profit_price on the very first call.
-    if _ORIG_COMPUTE_TAKE_PROFIT_PRICE is None:
-        _ORIG_COMPUTE_TAKE_PROFIT_PRICE = QC.compute_take_profit_price
-    # Always restore from the pristine before applying this call's overrides.
-    QC.compute_take_profit_price = _ORIG_COMPUTE_TAKE_PROFIT_PRICE
-    PM.compute_take_profit_price = _ORIG_COMPUTE_TAKE_PROFIT_PRICE
+    if _PRISTINE_PARAMS is None:
+        _PRISTINE_PARAMS = {
+            "TARGET_PROFIT_RATE": C.TARGET_PROFIT_RATE,
+            "ATR_TRAILING_MULTIPLIER": C.ATR_TRAILING_MULTIPLIER,
+            "RSI_BUY_UPPER": C.RSI_BUY_UPPER,
+            "RSI_BUY_LOWER": C.RSI_BUY_LOWER,
+            "TIME_STOP_TRADING_DAYS": C.TIME_STOP_TRADING_DAYS,
+            "compute_take_profit_price": QC.compute_take_profit_price,
+        }
+    p = _PRISTINE_PARAMS
+    C.TARGET_PROFIT_RATE = QC.TARGET_PROFIT_RATE = p["TARGET_PROFIT_RATE"]
+    C.ATR_TRAILING_MULTIPLIER = PM.ATR_TRAILING_MULTIPLIER = p["ATR_TRAILING_MULTIPLIER"]
+    C.RSI_BUY_UPPER = SE.RSI_BUY_UPPER = p["RSI_BUY_UPPER"]
+    C.RSI_BUY_LOWER = SE.RSI_BUY_LOWER = p["RSI_BUY_LOWER"]
+    C.TIME_STOP_TRADING_DAYS = PM.TIME_STOP_TRADING_DAYS = p["TIME_STOP_TRADING_DAYS"]
+    QC.compute_take_profit_price = p["compute_take_profit_price"]
+    PM.compute_take_profit_price = p["compute_take_profit_price"]
 
     if args.target_profit is not None:
         rate = Decimal(str(args.target_profit))
         C.TARGET_PROFIT_RATE = rate
         QC.TARGET_PROFIT_RATE = rate
         # compute_take_profit_price の default 引数も差し替え
-        _orig = _ORIG_COMPUTE_TAKE_PROFIT_PRICE
+        _orig = p["compute_take_profit_price"]
         def _patched_tp(entry_price, target_net_rate=rate, spread_rate=Decimal("0")):
             return _orig(entry_price, target_net_rate, spread_rate)
         QC.compute_take_profit_price = _patched_tp
@@ -537,6 +550,13 @@ def _apply_param_overrides(args: argparse.Namespace) -> None:
     if args.time_stop is not None:
         C.TIME_STOP_TRADING_DAYS = int(args.time_stop)
         PM.TIME_STOP_TRADING_DAYS = int(args.time_stop)
+
+
+def _restore_param_defaults() -> None:
+    """全パラメータを pristine に戻す（in-process 実行後のグローバル衛生用）。"""
+    _apply_param_overrides(argparse.Namespace(
+        target_profit=None, atr_mult=None, rsi_upper=None, rsi_lower=None, time_stop=None,
+    ))
 
 
 def _state_to_metrics(state: BacktestState, start: date, end: date) -> dict:
@@ -800,32 +820,36 @@ def run_one_backtest(
     # 3) Run the main loop with stdout suppressed (grid search quiet mode).
     import contextlib
     import io as _io
-    with contextlib.redirect_stdout(_io.StringIO()):
-        for today in trading_days:
-            updated: list[Position] = []
-            for pos in state.positions:
-                result = _process_exit(state, pos, today, full_cache)
-                if result is not None:
-                    updated.append(result)
-            state.positions = updated
+    try:
+        with contextlib.redirect_stdout(_io.StringIO()):
+            for today in trading_days:
+                updated: list[Position] = []
+                for pos in state.positions:
+                    result = _process_exit(state, pos, today, full_cache)
+                    if result is not None:
+                        updated.append(result)
+                state.positions = updated
 
-            pending_today = state.pending_entries
-            state.pending_entries = []
-            for pending in pending_today:
-                if state.open_slots <= 0:
-                    break
-                _process_pending_entry(state, pending, today, full_cache, settings)
+                pending_today = state.pending_entries
+                state.pending_entries = []
+                for pending in pending_today:
+                    if state.open_slots <= 0:
+                        break
+                    _process_pending_entry(state, pending, today, full_cache, settings)
 
-            if state.open_slots > 0:
-                _process_signal_scan(
-                    state, today,
-                    adj_close_full, volume_full,
-                    fund_base, bps_map,
-                    universe,
-                    open_slots=state.open_slots,
-                    signal_func=signal_func,
-                    verbose=False,
-                )
+                if state.open_slots > 0:
+                    _process_signal_scan(
+                        state, today,
+                        adj_close_full, volume_full,
+                        fund_base, bps_map,
+                        universe,
+                        open_slots=state.open_slots,
+                        signal_func=signal_func,
+                        verbose=False,
+                    )
+    finally:
+        # 上書きした定数をプロセスに残さない（同一プロセスの後続コードへの配慮）
+        _restore_param_defaults()
 
     metrics = _state_to_metrics(state, start, end)
     metrics["params"] = {
@@ -844,7 +868,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="S-Quant バックテスト（改訂版・単元株・ザラ場モード）")
     parser.add_argument("--start", default="2024-01-04", help="開始日 YYYY-MM-DD")
     parser.add_argument("--end",   default="2025-12-30", help="終了日 YYYY-MM-DD")
-    parser.add_argument("--budget", type=int, default=100_000, help="初期資本 (default: 100000)")
+    parser.add_argument("--budget", type=int, default=200_000,
+                        help="初期資本 (default: 200000 = Phase 1、in-process API と共通)")
     parser.add_argument("--rpm", type=int, default=30, help="J-Quants RPM (default: 30)")
     parser.add_argument("--verbose", action="store_true", help="毎日のフィルタ結果を表示")
     parser.add_argument("--cache-dir", default=".backtest_cache", help="データキャッシュ保存先")
@@ -856,8 +881,8 @@ def main() -> None:
     parser.add_argument("--time-stop", type=int, default=None, help="タイムストップ営業日 (例: 5)")
     parser.add_argument("--max-positions", type=int, default=DEFAULT_MAX_POSITIONS,
                         help=f"同時保有銘柄数の上限 (default: {DEFAULT_MAX_POSITIONS} = Phase 1)")
-    parser.add_argument("--signal", choices=["pullback", "ma_cross"], default="pullback",
-                        help="シグナル種別 (default: pullback = A1/B 戦略、ma_cross = C フェーズ)")
+    parser.add_argument("--signal", choices=["pullback", "ma_cross"], default="ma_cross",
+                        help="シグナル種別 (default: ma_cross = 採用済み C 戦略。pullback = 旧 A1/B)")
     parser.add_argument("--json", action="store_true", help="JSONメトリクスを最終行に出力（grid search用）")
     parser.add_argument("--quiet", action="store_true", help="進捗ログ抑制（grid search用）")
     args = parser.parse_args()
@@ -884,31 +909,10 @@ def main() -> None:
                 print(f"  {label}: {done}/{total} ({done/total*100:.0f}%)", flush=True)
         return _cb
 
-    def _find_compatible_cache() -> Path | None:
-        """必要期間 [fetch_start, end] をカバーする既存キャッシュを探す。
-        ファイル名フォーマット: data_{cached_fetch_start}_{cached_end}.pkl
-        cached_fetch_start <= fetch_start && cached_end >= end なら再利用可。
-        """
-        if not cache_dir.exists():
-            return None
-        candidates: list[tuple[Path, date, date]] = []
-        for p in cache_dir.glob("data_*.pkl"):
-            stem = p.stem.removeprefix("data_")
-            try:
-                cs_str, ce_str = stem.split("_")
-                cs = date.fromisoformat(cs_str)
-                ce = date.fromisoformat(ce_str)
-            except (ValueError, IndexError):
-                continue
-            if cs <= fetch_start and ce >= end:
-                candidates.append((p, cs, ce))
-        if not candidates:
-            return None
-        # 最も小さい（タイトな）カバー範囲を優先
-        candidates.sort(key=lambda x: (x[2] - x[1]).days)
-        return candidates[0][0]
-
-    usable_cache = cache_file if cache_file.exists() else _find_compatible_cache()
+    usable_cache = (
+        cache_file if cache_file.exists()
+        else _find_compatible_cache_path(fetch_start, end, cache_dir)
+    )
 
     if usable_cache is not None:
         if not args.quiet:
