@@ -49,7 +49,23 @@
       "Bash(awk *)",
       "Bash(sed *)",
       "Bash(curl *)",
-      "Bash(wget *)"
+      "Bash(wget *)",
+      "Bash(git status)",
+      "Bash(git status *)",
+      "Bash(git log)",
+      "Bash(git log *)",
+      "Bash(git diff)",
+      "Bash(git diff *)",
+      "Bash(git show)",
+      "Bash(git show *)",
+      "Bash(git branch)",
+      "Bash(git branch *)",
+      "Bash(git remote *)",
+      "Bash(git config --get *)",
+      "Bash(git rev-parse *)",
+      "Bash(git ls-files *)",
+      "Bash(xargs grep *)",
+      "Bash(xargs ls *)"
     ]
   },
   "hooks": {
