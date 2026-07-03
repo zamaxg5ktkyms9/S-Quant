@@ -136,15 +136,26 @@ def _run_subprocess(cache_dir: Path, params: dict) -> dict:
     raise AssertionError(f"__METRICS_JSON__ not found:\n{result.stdout[-2000:]}")
 
 
-def _run_inprocess(cache_dir: Path, params: dict) -> dict:
+def _run_inprocess(
+    cache_dir: Path, params: dict,
+    signal: str = "ma_cross", precomputed: bool = False,
+) -> dict:
     data = bt.load_cache(date.fromisoformat(START), date.fromisoformat(END), cache_dir=cache_dir)
+    pre = None
+    if precomputed:
+        rsi_kwargs = {} if signal == "ma_cross" else {"rsi_upper": params["rsi_upper"]}
+        pre = bt.precompute_daily_candidates(
+            date.fromisoformat(START), date.fromisoformat(END), data,
+            signal_strategy=signal, **rsi_kwargs,
+        )
     return bt.run_one_backtest(
         date.fromisoformat(START), date.fromisoformat(END), data,
-        budget=200_000, max_positions=2, signal_strategy="ma_cross",
+        budget=200_000, max_positions=2, signal_strategy=signal,
         target_profit=params["target_profit"],
         atr_mult=params["atr_mult"],
         rsi_upper=params["rsi_upper"],
         time_stop=params["time_stop"],
+        precomputed_candidates=pre,
     )
 
 
@@ -176,3 +187,36 @@ class TestInprocessEquivalence:
         _ = _run_inprocess(cache_dir, PARAM_SETS[1])
         a2 = _run_inprocess(cache_dir, PARAM_SETS[0])
         _assert_metrics_equal(a1, a2, label="A-rerun")
+
+
+class TestPrecomputeEquivalence:
+    """日次候補の事前計算経路が、毎日スキャンする経路と同値であることの保証。"""
+
+    @pytest.mark.parametrize("params", PARAM_SETS, ids=["set_a", "set_b"])
+    def test_matches_scan_path_ma_cross(self, cache_dir, params):
+        scan = _run_inprocess(cache_dir, params)
+        pre = _run_inprocess(cache_dir, params, precomputed=True)
+        _assert_metrics_equal(scan, pre, label=f"precompute {params}")
+        assert pre["trades"] > 0
+
+    def test_matches_scan_path_pullback(self, cache_dir):
+        """pullback は RSI 帯がシグナル条件に入る — その経路でも同値。"""
+        params = PARAM_SETS[0]
+        scan = _run_inprocess(cache_dir, params, signal="pullback")
+        pre = _run_inprocess(cache_dir, params, signal="pullback", precomputed=True)
+        _assert_metrics_equal(scan, pre, label="precompute pullback")
+
+    def test_runner_memoizes_and_matches(self, cache_dir):
+        """InProcessGridRunner が memo を共有しつつ、直接実行と同じ metrics を返す。"""
+        from grid_search import InProcessGridRunner
+
+        data = bt.load_cache(
+            date.fromisoformat(START), date.fromisoformat(END), cache_dir=cache_dir,
+        )
+        runner = InProcessGridRunner(data, budget=200_000, max_positions=2, signal="ma_cross")
+        r_a = runner.run(PARAM_SETS[0], START, END)
+        _ = runner.run(PARAM_SETS[1], START, END)
+        # ma_cross の候補は出口パラメータに依存しないため memo は期間単位で1件
+        assert len(runner._candidates_memo) == 1
+        base = _run_inprocess(cache_dir, PARAM_SETS[0])
+        _assert_metrics_equal(base, r_a, label="runner vs direct")

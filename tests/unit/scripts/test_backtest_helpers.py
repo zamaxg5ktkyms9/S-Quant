@@ -161,8 +161,8 @@ class TestApplyParamOverridesIdempotency:
         _apply_param_overrides(_ns(
             target_profit=0.03, atr_mult=2.5, rsi_upper=50, rsi_lower=40, time_stop=3,
         ))
-        assert constants.ATR_TRAILING_MULTIPLIER == Decimal("2.5")
-        assert position_manager.ATR_TRAILING_MULTIPLIER == Decimal("2.5")
+        assert Decimal("2.5") == constants.ATR_TRAILING_MULTIPLIER
+        assert Decimal("2.5") == position_manager.ATR_TRAILING_MULTIPLIER
         assert signal_engine.RSI_BUY_UPPER == 50.0
         assert position_manager.TIME_STOP_TRADING_DAYS == 3
 
@@ -172,10 +172,10 @@ class TestApplyParamOverridesIdempotency:
                     constants.RSI_BUY_UPPER, constants.RSI_BUY_LOWER,
                     constants.TIME_STOP_TRADING_DAYS)
         assert restored == pristine
-        assert position_manager.ATR_TRAILING_MULTIPLIER == pristine[1]
-        assert signal_engine.RSI_BUY_UPPER == pristine[2]
-        assert signal_engine.RSI_BUY_LOWER == pristine[3]
-        assert position_manager.TIME_STOP_TRADING_DAYS == pristine[4]
+        assert pristine[1] == position_manager.ATR_TRAILING_MULTIPLIER
+        assert pristine[2] == signal_engine.RSI_BUY_UPPER
+        assert pristine[3] == signal_engine.RSI_BUY_LOWER
+        assert pristine[4] == position_manager.TIME_STOP_TRADING_DAYS
 
     def test_take_profit_patch_does_not_stack(self, restore_params):
         """繰り返し呼んでも closure が多重ラップされない"""

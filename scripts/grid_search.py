@@ -29,7 +29,7 @@ BACKTEST_SCRIPT = REPO_ROOT / "scripts" / "backtest.py"
 sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from backtest import load_cache as _load_cache_for_backtest  # noqa: E402
-from backtest import run_one_backtest  # noqa: E402
+from backtest import precompute_daily_candidates, run_one_backtest  # noqa: E402
 
 # パラメータ Grid（180通り = 5×3×4×3）
 GRID = {
@@ -98,6 +98,33 @@ class InProcessGridRunner:
         self.budget = budget
         self.max_positions = max_positions
         self.signal = signal
+        # 日次候補リストの memo。候補は出口パラメータに依存しないため、
+        # ma_cross は (期間) 単位で、pullback は (期間, RSI帯) 単位で共有できる。
+        self._candidates_memo: dict[tuple, dict] = {}
+
+    def _effective_signal(self) -> str:
+        return self.signal if self.signal is not None else "ma_cross"
+
+    def _precomputed_for(self, params: dict, start: str, end: str) -> dict:
+        from datetime import date as _date
+        signal = self._effective_signal()
+        if signal == "ma_cross":
+            key: tuple = (start, end, signal)
+            rsi_kwargs: dict = {}
+        else:  # pullback は RSI 帯がシグナル条件に入る
+            key = (start, end, signal, params.get("rsi_upper"), params.get("rsi_lower"))
+            rsi_kwargs = {
+                "rsi_upper": params.get("rsi_upper"),
+                "rsi_lower": params.get("rsi_lower"),
+            }
+        pre = self._candidates_memo.get(key)
+        if pre is None:
+            pre = precompute_daily_candidates(
+                _date.fromisoformat(start), _date.fromisoformat(end), self.data,
+                signal_strategy=signal, **rsi_kwargs,
+            )
+            self._candidates_memo[key] = pre
+        return pre
 
     def run(self, params: dict, start: str, end: str) -> dict | None:
         from datetime import date as _date
@@ -116,6 +143,7 @@ class InProcessGridRunner:
                 rsi_upper=params.get("rsi_upper"),
                 rsi_lower=params.get("rsi_lower"),
                 time_stop=params.get("time_stop"),
+                precomputed_candidates=self._precomputed_for(params, start, end),
                 **kwargs,
             )
         except Exception:

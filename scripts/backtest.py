@@ -762,6 +762,105 @@ def load_cache(
     }
 
 
+def precompute_daily_candidates(
+    start: date, end: date, data: dict,
+    *,
+    signal_strategy: str = "ma_cross",
+    rsi_upper: float | None = None,
+    rsi_lower: float | None = None,
+    universe: list[str] | None = None,
+) -> dict[date, list]:
+    """日次の「ランク済み全候補リスト」を一括計算する（グリッド全セルで再利用可）。
+
+    スクリーニング・シグナル検出・ランキング順位は出口パラメータ
+    （target_profit / atr_mult / time_stop）に依存しない。依存するのは
+    signal 種別と、pullback の場合のみ RSI 帯（rsi_upper / rsi_lower）。
+    したがって同一 (signal, RSI 帯) のグリッドセル間でこの結果を共有でき、
+    メインループから最重量のシグナルスキャンを排除できる。
+
+    状態依存の絞り込み（保有銘柄除外・予算フィルタ・スロット数切り出し）は
+    ``_scan_from_precomputed`` が per-cell で適用する。
+    """
+    _apply_param_overrides(argparse.Namespace(
+        target_profit=None, atr_mult=None,
+        rsi_upper=rsi_upper, rsi_lower=rsi_lower, time_stop=None,
+    ))
+    if universe is None:
+        universe = load_universe()
+    adj_close_full = data["adj_close"]
+    volume_full = data["volume"]
+    fund_base = data["fundamentals"]
+    bps_map = data["bps_map"]
+    signal_func = (
+        signal_engine.detect_signals_ma_cross
+        if signal_strategy == "ma_cross"
+        else signal_engine.detect_signals
+    )
+    trading_days = sorted(
+        d.date() for d in pd.bdate_range(start, end) if is_tse_trading_day(d.date())
+    )
+
+    result: dict[date, list] = {}
+    try:
+        for today in trading_days:
+            adj_slice = adj_close_full.loc[:str(today)]
+            vol_slice = volume_full.loc[:str(today)]
+            if len(adj_slice) < 30:
+                result[today] = []
+                continue
+            fund = _update_pbr(fund_base, bps_map, adj_slice)
+            filtered = screener.apply_fundamental_filters(
+                universe, adj_slice, fund, today, set()
+            )
+            if filtered.empty:
+                result[today] = []
+                continue
+            ohlcv_sig = adj_slice.copy()
+            for col in vol_slice.columns:
+                ohlcv_sig[f"{col}_vol"] = vol_slice[col]
+            candidates = signal_func(filtered["ticker"].tolist(), ohlcv_sig, fund, today)
+            # 全候補をランク順で保存。per-cell では順序を保ったまま絞るだけなので、
+            # rank(部分集合) と同値（安定ソート）。
+            result[today] = ranking.rank(candidates, top_n=len(candidates))
+    finally:
+        _restore_param_defaults()
+    return result
+
+
+def _scan_from_precomputed(state: BacktestState, today: date, ranked: list) -> None:
+    """事前計算済みランク候補に状態依存の絞り込みだけを適用してキューイング。
+
+    ``_process_signal_scan`` と同値であることが要件:
+    - 保有銘柄除外: 原実装は screener 段階だが、検出は銘柄ごとに独立なので
+      候補リスト段階の除外と等価
+    - 予算フィルタ → ランク上位 open_slots 件: ランク済みリストの部分列は
+      rank(フィルタ後集合) と一致（同一キーの安定ソート）
+    """
+    open_slots = state.open_slots
+    if open_slots <= 0 or not ranked:
+        return
+
+    held = state.held_tickers
+    slot_budget_est = state.cash / max(open_slots, 1)
+    max_buyable = (slot_budget_est / SHARES_PER_UNIT) / (1 + GAP_UP_CANCEL_THRESHOLD)
+    affordable = [c for c in ranked if c.ticker not in held and c.close <= max_buyable]
+    if not affordable:
+        return
+
+    state.signals_found += 1
+    for best in affordable[:open_slots]:
+        state.pending_entries.append(PendingEntry(
+            ticker=best.ticker,
+            signal_date=today,
+            reference_close=best.close,
+            rsi14=best.rsi14,
+        ))
+        print(
+            f"  SIGNAL {best.ticker} @ ¥{best.close} RSI={best.rsi14:.1f}  (entry next day)",
+            flush=True,
+        )
+
+
 def run_one_backtest(
     start: date, end: date, data: dict,
     *,
@@ -774,6 +873,7 @@ def run_one_backtest(
     rsi_lower: float | None = None,
     time_stop: int | None = None,
     universe: list[str] | None = None,
+    precomputed_candidates: dict[date, list] | None = None,
 ) -> dict:
     """Execute one in-process backtest cycle and return its metrics dict.
 
@@ -781,6 +881,10 @@ def run_one_backtest(
     startup, pickle reload, and stdout parsing are all skipped — only the
     actual simulation runs. Typical speedup is ~10-20x over the
     subprocess-based path.
+
+    ``precomputed_candidates``（``precompute_daily_candidates`` の戻り値）を
+    渡すと日次シグナルスキャンも省略され、出口シミュレーションだけが走る。
+    グリッド探索では全セルで共有でき、さらに桁違いに速くなる。
     """
     # 1) Apply parameter overrides idempotently (reset → re-patch).
     args = argparse.Namespace(
@@ -838,15 +942,20 @@ def run_one_backtest(
                     _process_pending_entry(state, pending, today, full_cache, settings)
 
                 if state.open_slots > 0:
-                    _process_signal_scan(
-                        state, today,
-                        adj_close_full, volume_full,
-                        fund_base, bps_map,
-                        universe,
-                        open_slots=state.open_slots,
-                        signal_func=signal_func,
-                        verbose=False,
-                    )
+                    if precomputed_candidates is not None:
+                        _scan_from_precomputed(
+                            state, today, precomputed_candidates.get(today, []),
+                        )
+                    else:
+                        _process_signal_scan(
+                            state, today,
+                            adj_close_full, volume_full,
+                            fund_base, bps_map,
+                            universe,
+                            open_slots=state.open_slots,
+                            signal_func=signal_func,
+                            verbose=False,
+                        )
     finally:
         # 上書きした定数をプロセスに残さない（同一プロセスの後続コードへの配慮）
         _restore_param_defaults()
