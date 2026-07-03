@@ -1,14 +1,15 @@
 # S-Quant
 
-日本株の自動スクリーニング・シグナル検出システム。平日 20:15 JST に GitHub Actions で自動実行される。
+日本株の自動スクリーニング・シグナル検出システム。平日 20:30 JST に GitHub Actions で自動実行される。
 
 詳細ドキュメント: [要件](docs/requirements.md) / [設計](docs/design.md)
 
 ## 概要
 
-- **対象**: 東証上場銘柄（S株単元 = 1株ずつ売買）
-- **予算**: ¥100,000
-- **運用モデル**: 半自動（シグナル検出 → オペレーター確認 → 手動発注）
+- **対象**: 東証上場銘柄（単元株 = 100株単位、SBI証券・手数料0円）
+- **予算**: ¥200,000（Phase 1・最大2銘柄分散）
+- **戦略**: C 戦略 = 5×25日 MA クロス + 25日MA 上向き + 出来高サージ（トレンドフォロー）
+- **運用モデル**: 半自動（シグナル検出 → オペレーター確認 → 手動発注 + OCO）
 - **データソース**: J-Quants API v2（価格・ファンダメンタルズ、RPM=50）
 
 ## 処理フロー
@@ -17,8 +18,8 @@
 ユニバース読み込み（282銘柄）
   → 接続確認（J-Quants / Google Sheets）
   → ファンダメンタルスクリーニング（時価総額・流動性・PBR・自己資本比率・株価）
-  → テクニカルシグナル検出（トレンド・RSI・ボラティリティ・出来高）
-  → 上位1銘柄を選出（RSI昇順 → 出来高サージ降順 → PBR昇順）
+  → テクニカルシグナル検出（5日MA > 25日MA・25日MA上向き・出来高サージ）
+  → 空きスロット数まで選出（RSI昇順 → 出来高サージ降順 → PBR昇順、最大2銘柄）
   → Slack通知 + Google Sheets に記録
 ```
 
@@ -40,7 +41,7 @@ cp .env.example .env  # APIキーを設定
 | `SLACK_WEBHOOK_URL` | Slack Incoming Webhook | — |
 | `SPREADSHEET_ID` | Google Sheets ID | — |
 | `GCP_SA_KEY_JSON` | GCP サービスアカウントキー（JSON文字列） | — |
-| `BUDGET_JPY` | 1回あたりの投資上限 | `100000` |
+| `BUDGET_JPY` | 投資資本（Phase 1） | `200000` |
 | `STOP_LOSS_RATE` | ハードストップロス率 | `0.025` |
 | `GAP_UP_THRESHOLD` | ギャップアップキャンセル閾値 | `0.02` |
 | `TIME_STOP_DAYS` | タイムストップ日数 | `5` |
@@ -55,7 +56,7 @@ cp .env.example .env  # APIキーを設定
 DRY_RUN=true python -m squant.main
 
 # 本番（GitHub Actions で自動実行）
-# .github/workflows/daily_run.yml — 平日 20:15 JST (11:15 UTC)
+# .github/workflows/daily_run.yml — 平日 20:30 JST (11:30 UTC)
 # ※ 20:00 JST 以前のローカル実行は execution_time_guard でスキップされる
 ```
 
@@ -73,6 +74,24 @@ python scripts/backtest.py --start 2024-01-04 --end 2024-12-31 --verbose
 ```
 
 取得データは `.backtest_cache/` にキャッシュされる。再実行時はAPIコールなしで即座に完了する。
+デフォルトは C 戦略（`--signal ma_cross`）・Phase 1 予算（`--budget 200000`）。
+
+### Grid Search / Walk-Forward（in-process 高速経路）
+
+```bash
+# Grid Search 180通り（デフォルト: in-process + 日次候補precompute、~4分/1年窓）
+python scripts/grid_search.py --start 2024-01-04 --end 2024-12-31
+
+# Walk-Forward rolling 3窓（IS/OOS 各1年）
+python scripts/walk_forward.py --signal ma_cross --budget 200000 --max-positions 2
+
+# 旧 subprocess 経路（同値性検証用）
+python scripts/grid_search.py --mode subprocess --workers 1
+```
+
+in-process 経路はキャッシュを1回だけロードし、シグナルスキャンをグリッド全セルで再利用する
+（実測 5.8x、遅い期間ほど効果大）。subprocess 経路との同値性は
+`tests/integration/test_inprocess_equivalence.py` で保証される。
 
 ## テスト
 
@@ -109,5 +128,7 @@ src/squant/
     ├── sheets_client.py         # Google Sheets クライアント
     └── sheets_repository.py     # 状態永続化
 scripts/
-└── backtest.py                  # バックテストスクリプト
+├── backtest.py                  # バックテストエンジン（CLI + in-process API）
+├── grid_search.py               # パラメータ探索（in-process runner + precompute）
+└── walk_forward.py              # IS/OOS 検証（rolling 3窓、--mode inprocess）
 ```

@@ -3,7 +3,23 @@
 長時間処理（バックテスト・Walk-Forward・Grid Search）で繰り返し発生した
 ハマりどころと、その回避策を集約する。**ここに書いてある制約は守ること**。
 
-## 1. `walk_forward.py` / `grid_search.py` の並列実行
+## 0. 【2026-07-03】in-process 経路がデフォルトになった
+
+`grid_search.py` / `walk_forward.py` は **`--mode inprocess`（デフォルト）** でキャッシュを
+1回だけロードし、日次候補を precompute してグリッド全セルで再利用する。
+subprocess を一切起動しないため、**§1〜3 の落とし穴（pickle I/O 競合・subprocess timeout・
+並列詰まり）は in-process モードでは発生しない**。§1〜3 は `--mode subprocess`
+（同値性検証用に温存）を使う場合のみ適用される。
+
+- 実測: 8.12s/combo（subprocess）→ **1.41s/combo（in-process + precompute、5.8x）**。
+  遅い期間（2022年 = 187s/combo）ほど効果大（1窓 9.5h → 推定 10分前後、実測は未取得）
+- 同値性は `tests/integration/test_inprocess_equivalence.py` で保証
+  （subprocess vs in-process vs precompute の metrics 完全一致）
+- in-process はシリアル実行（`_apply_param_overrides` がモジュール定数を書き換えるため
+  スレッド安全ではない）。`--workers` は subprocess モードのみ有効
+- ETA 監視・`--max-wall-clock-seconds`・`--benchmark` は両モード共通で機能する
+
+## 1. `walk_forward.py` / `grid_search.py` の並列実行（`--mode subprocess` のみ）
 
 ### 既知の失敗パターン
 
@@ -70,11 +86,13 @@
 - `backtest.py` のメインループ（`_run_loop` 内の `_process_signal_scan`）に O(N²) 的な遅さがある可能性
 - フル期間 4年 で 4時間以上、1年期間で 8秒。期間に対して線形ではない
 
-### 暫定対応
+### 対応状況（2026-07-03 更新）
 
-- バックテストは 1年期間で 8秒以内に収まる
-- フル期間（4年）を直接回すのは避け、Walk-Forward / Grid Search の単位（1年）で扱う
-- 解消は B-WF 完了後の改修課題（`adj_close_full.loc[:str(today)]` 等のスライス削減）
+- **グリッド/WF 用途は §0 の precompute で解消済み**（スキャンをセル間で共有）
+- 単発 CLI 実行（`python scripts/backtest.py`）は従来どおりスキャンが走る。
+  1年期間なら数秒〜3分程度で収まるが、フル期間（4年）の直接実行は引き続き避ける
+- 残改修候補: `adj_close_full.loc[:str(today)]` のスライスコピー削減、
+  `ohlcv_sig` 組み立ての `pd.concat` 化（断片化 PerformanceWarning）
 
 ## 6. キャッシュファイル
 
@@ -107,3 +125,4 @@
 ## 改訂履歴
 
 - 2026-05-26: 初版作成（A1 / B-WF 1回目の失敗を受けて）
+- 2026-07-03: §0 追加（in-process + precompute がデフォルト化、§1〜3 は subprocess モード限定に）、§5 更新

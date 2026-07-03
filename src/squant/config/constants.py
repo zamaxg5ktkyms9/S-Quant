@@ -44,8 +44,8 @@ TIME_STOP_TRADING_DAYS = 5                 # 3/5/7で大差なし、5日が安�
 TARGET_PROFIT_RATE = Decimal("0.06")       # +6.0% take-profit (単元株・SBIゼロ革命で手数料0)
 
 # --- Risk management ---
-CIRCUIT_BREAKER_LOSS_JPY = Decimal("30000")    # Phase 1: 投資資本×30%
-CIRCUIT_BREAKER_LOSS_RATE = Decimal("0.30")    # Phase 2/3 は 0.15 に厳格化
+CIRCUIT_BREAKER_LOSS_JPY = Decimal("30000")    # Phase 1: 投資資本¥200,000 × 15%（判定はこの絶対額）
+CIRCUIT_BREAKER_LOSS_RATE = Decimal("0.15")    # 全 Phase 共通 15%（情報用。判定は LOSS_JPY）
 
 # --- Capital ---
 DEFAULT_BUDGET_JPY = Decimal("100000")

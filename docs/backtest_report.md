@@ -641,6 +641,40 @@ IS ベストパラメータの安定性:
 - `docs/backtests/walkforward_single_C_W2.json` (IS=2023/OOS=2024, ✅)
 - `docs/backtests/walkforward_single_C_W3.json` (IS=2024/OOS=2025, ✅)
 
+### 8.11 検証基盤の高速化 — in-process 化 + 日次候補 precompute（2026-07-03 完了）
+
+#### 動機
+
+§8.9 で特定した構造的ボトルネック（subprocess 単位の実行で W2 IS が 9.5 時間）の恒久解消。§8.10 次ステップ候補 2「`backtest.py` のライブラリ化」に対応する。
+
+#### 実装内容
+
+- `backtest.py`: `run_one_backtest()` / `load_cache()` / `precompute_daily_candidates()` / `_scan_from_precomputed()` を追加。`_apply_param_overrides` は 5 定数のフル snapshot→restore で冪等化し、実行後 finally で復元
+- `grid_search.py`: `InProcessGridRunner`（日次候補 memo を全セルで共有。ma_cross は期間単位、pullback は期間+RSI 帯単位）。`--mode inprocess|subprocess`（デフォルト: inprocess）
+- `walk_forward.py`: 同 `--mode` フラグで runner 対応。ETA 監視・全体タイムアウトは両経路共通
+- 同値性保証: `tests/integration/test_inprocess_equivalence.py`（合成データで subprocess vs in-process vs precompute の metrics 完全一致 + 状態リーク検査）。テスト 233 件 PASS
+
+#### precompute の同値性根拠
+
+スクリーニング・シグナル検出・ランキング順位は出口パラメータ（TP/ATR/TS）に依存しない。状態依存の絞り込み（保有銘柄除外・予算フィルタ・スロット数切り出し）のみを per-cell で適用する。検出は銘柄ごとに独立、ランキングは安定ソートのため、事前ランク済みリストの部分列は rank(部分集合) と一致する。
+
+#### 実測ベンチ（2024-01-04〜2024-12-30、ma_cross ¥200k×2銘柄、GRID 先頭 6 combos）
+
+| 経路 | s/combo | 対 subprocess |
+|---|---|---|
+| subprocess（従来） | 8.12s | 1.0x |
+| in-process（スキャンあり） | 7.62s | 1.1x |
+| **in-process + precompute** | **1.41s** | **5.8x** |
+
+- **ボトルネックは subprocess オーバーヘッドではなく日次シグナルスキャンだった**（in-process 化単体は 1.1x）。precompute はスキャン自体を排除する
+- 180 combos × 1 年窓の推定: 約 4 分（従来 24 分）。スキャンが支配的だった遅い期間（2022 年 = 187s/combo → 1窓 9.5h）では **推定 10 分前後（~60x）**
+- 残改善余地: `ohlcv_sig` の断片化 PerformanceWarning（`pd.concat` 化）、出口シミュレーションの `loc[:today]` スライス
+
+#### 次ステップ
+
+- `python scripts/walk_forward.py --signal ma_cross --budget 200000 --max-positions 2` で **rolling 3 窓を1コマンド一括再実行**し、§8.10 の手動集計（単窓3回）を統合 JSON（verdict 自動判定）で置き換える
+- 本番パラメータ（TP 6% / ATR 1.5 / TS 5 = A1 Grid ベスト流用）の C 戦略での再感度分析（[design.md パラメータ確定値の注記](design.md) 参照）
+
 ---
 
 ## 9. Strategy Iteration Log
