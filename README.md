@@ -7,9 +7,9 @@
 ## 概要
 
 - **対象**: 東証上場銘柄（単元株 = 100株単位、SBI証券・手数料0円）
-- **予算**: ¥200,000（Phase 1・最大2銘柄分散）
+- **予算**: ¥600,000（最終増額済み・最大2銘柄分散・株価上限¥3,000）
 - **戦略**: C 戦略 = 5×25日 MA クロス + 25日MA 上向き + 出来高サージ（トレンドフォロー）
-- **運用モデル**: 半自動（シグナル検出 → オペレーター確認 → 手動発注 + OCO）
+- **運用モデル**: 半自動（シグナル検出 → オペレーター確認 → 手動発注 + 損切り逆指値。利確指値なし = TP 廃止）
 - **データソース**: J-Quants API v2（価格・ファンダメンタルズ、RPM=50）
 
 ## 処理フロー
@@ -41,11 +41,11 @@ cp .env.example .env  # APIキーを設定
 | `SLACK_WEBHOOK_URL` | Slack Incoming Webhook | — |
 | `SPREADSHEET_ID` | Google Sheets ID | — |
 | `GCP_SA_KEY_JSON` | GCP サービスアカウントキー（JSON文字列） | — |
-| `BUDGET_JPY` | 投資資本（Phase 1） | `200000` |
+| `BUDGET_JPY` | 投資資本 | `600000` |
 | `STOP_LOSS_RATE` | ハードストップロス率 | `0.025` |
 | `GAP_UP_THRESHOLD` | ギャップアップキャンセル閾値 | `0.02` |
 | `TIME_STOP_DAYS` | タイムストップ日数 | `5` |
-| `CIRCUIT_BREAKER_LOSS_JPY` | サーキットブレーカー発動損失額 | `30000` |
+| `CIRCUIT_BREAKER_LOSS_JPY` | サーキットブレーカー発動損失額 | `90000` |
 | `JQUANTS_RPM` | J-Quants APIレート上限（req/min） | `50` |
 | `DRY_RUN` | 書き込みなし・通知なしのテストモード | `false` |
 
@@ -74,16 +74,16 @@ python scripts/backtest.py --start 2024-01-04 --end 2024-12-31 --verbose
 ```
 
 取得データは `.backtest_cache/` にキャッシュされる。再実行時はAPIコールなしで即座に完了する。
-デフォルトは C 戦略（`--signal ma_cross`）・Phase 1 予算（`--budget 200000`）。
+デフォルトは C 戦略（`--signal ma_cross`）・本番予算（`--budget 600000`）・出口 noTP/ATR3.0/TS5。
 
 ### Grid Search / Walk-Forward（in-process 高速経路）
 
 ```bash
-# Grid Search 180通り（デフォルト: in-process + 日次候補precompute、~4分/1年窓）
+# Grid Search 96通り（デフォルト: in-process + 日次候補precompute、1〜2分/1年窓）
 python scripts/grid_search.py --start 2024-01-04 --end 2024-12-31
 
 # Walk-Forward rolling 3窓（IS/OOS 各1年）
-python scripts/walk_forward.py --signal ma_cross --budget 200000 --max-positions 2
+python scripts/walk_forward.py   # デフォルトで本番構成（¥600k・2銘柄・ma_cross）
 
 # 旧 subprocess 経路（同値性検証用）
 python scripts/grid_search.py --mode subprocess --workers 1
@@ -121,7 +121,7 @@ src/squant/
 │   ├── signal_engine.py         # テクニカルシグナル検出
 │   ├── ranking.py               # 候補ランキング
 │   ├── position_manager.py      # 出口ルール評価
-│   └── quantity_calculator.py   # 株数・利確価格計算
+│   └── quantity_calculator.py   # 株数・ストップ価格計算
 └── infrastructure/
     ├── jquants_client.py        # J-Quants API v2 クライアント
     ├── yfinance_client.py       # yfinance フォールバック
