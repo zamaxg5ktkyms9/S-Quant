@@ -1,0 +1,63 @@
+{
+  "note": "W1best 固定 (TP5/ATR2.5/TS5) を ¥400k/price_max2000 で各年評価",
+  "years": {
+    "2022": {
+      "trades": 115,
+      "monthly_pnl_pct": 0.13037694444444442,
+      "profit_factor": 1.0245860441877988,
+      "max_dd_pct": -16.053124999999998,
+      "win_rate": 0.3739130434782609,
+      "total_pnl": 6175.75,
+      "by_reason": {
+        "STOP_LOSS": 57,
+        "TIME_STOP": 32,
+        "TRAILING_STOP": 7,
+        "TAKE_PROFIT": 19
+      }
+    },
+    "2023": {
+      "trades": 96,
+      "monthly_pnl_pct": -0.45424818941504175,
+      "profit_factor": 0.8999268943629374,
+      "max_dd_pct": -15.0611875,
+      "win_rate": 0.4270833333333333,
+      "total_pnl": -21457.25,
+      "by_reason": {
+        "TIME_STOP": 38,
+        "STOP_LOSS": 42,
+        "TAKE_PROFIT": 13,
+        "TRAILING_STOP": 3
+      }
+    },
+    "2024": {
+      "trades": 94,
+      "monthly_pnl_pct": -0.3316368421052631,
+      "profit_factor": 0.9264964403657738,
+      "max_dd_pct": -22.106,
+      "win_rate": 0.40425531914893614,
+      "total_pnl": -15752.75,
+      "by_reason": {
+        "TAKE_PROFIT": 19,
+        "STOP_LOSS": 45,
+        "TRAILING_STOP": 5,
+        "TIME_STOP": 25
+      }
+    },
+    "2025": {
+      "trades": 88,
+      "monthly_pnl_pct": 1.3353444134078212,
+      "profit_factor": 1.3458596283349578,
+      "max_dd_pct": -8.7466875,
+      "win_rate": 0.4659090909090909,
+      "total_pnl": 62901.75,
+      "by_reason": {
+        "TAKE_PROFIT": 18,
+        "TIME_STOP": 29,
+        "STOP_LOSS": 40,
+        "TRAILING_STOP": 1
+      }
+    }
+  },
+  "avg_monthly_pct": 0.17,
+  "positive_years": "2/4"
+}
