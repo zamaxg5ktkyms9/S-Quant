@@ -1,0 +1,249 @@
+{
+  "grid": {
+    "target_profit": [
+      "0.04",
+      "0.05",
+      "0.06",
+      "0.08",
+      "0.1",
+      "10.0"
+    ],
+    "atr_mult": [
+      "1.5",
+      "2.0",
+      "2.5",
+      "3.0"
+    ],
+    "rsi_upper": [
+      "45"
+    ],
+    "time_stop": [
+      "5",
+      "7",
+      "10",
+      "15"
+    ]
+  },
+  "no_tp_sentinel": 10.0,
+  "budget": 600000,
+  "price_max": 3000,
+  "windows": [
+    {
+      "label": "W1",
+      "is_period": "2022-01-04..2022-12-30",
+      "oos_period": "2023-01-04..2023-12-29",
+      "is_best_params": {
+        "target_profit": 0.04,
+        "atr_mult": 3.0,
+        "rsi_upper": 45,
+        "rsi_lower": null,
+        "time_stop": 15,
+        "price_max": 3000,
+        "max_positions": 2,
+        "signal": "ma_cross"
+      },
+      "is_best": {
+        "trades": 89,
+        "monthly_pnl_pct": 0.7799373333333333,
+        "profit_factor": 1.1613231522533354,
+        "max_dd_pct": -14.187916666666666,
+        "win_rate": 0.42696629213483145,
+        "avg_holding_days": 6.056179775280899,
+        "by_reason": {
+          "STOP_LOSS": 50,
+          "TAKE_PROFIT": 37,
+          "TIME_STOP": 2
+        }
+      },
+      "is_top5": [
+        {
+          "tag": "TP0.04/ATR3.0/TS15",
+          "is_monthly": 0.78,
+          "is_pf": 1.16
+        },
+        {
+          "tag": "noTP/ATR3.0/TS10",
+          "is_monthly": 0.71,
+          "is_pf": 1.15
+        },
+        {
+          "tag": "noTP/ATR3.0/TS5",
+          "is_monthly": 0.63,
+          "is_pf": 1.12
+        },
+        {
+          "tag": "TP0.1/ATR3.0/TS5",
+          "is_monthly": 0.51,
+          "is_pf": 1.1
+        },
+        {
+          "tag": "TP0.08/ATR3.0/TS10",
+          "is_monthly": 0.5,
+          "is_pf": 1.1
+        }
+      ],
+      "oos": {
+        "trades": 80,
+        "monthly_pnl_pct": 0.3243936861652739,
+        "profit_factor": 1.07557697935402,
+        "max_dd_pct": -12.421375,
+        "win_rate": 0.4125,
+        "avg_holding_days": 6.5375,
+        "by_reason": {
+          "STOP_LOSS": 44,
+          "TAKE_PROFIT": 29,
+          "TRAILING_STOP": 4,
+          "TIME_STOP": 3
+        }
+      },
+      "robust": true,
+      "elapsed_sec": 49.0
+    },
+    {
+      "label": "W2",
+      "is_period": "2023-01-04..2023-12-29",
+      "oos_period": "2024-01-04..2024-12-30",
+      "is_best_params": {
+        "target_profit": 0.06,
+        "atr_mult": 3.0,
+        "rsi_upper": 45,
+        "rsi_lower": null,
+        "time_stop": 5,
+        "price_max": 3000,
+        "max_positions": 2,
+        "signal": "ma_cross"
+      },
+      "is_best": {
+        "trades": 96,
+        "monthly_pnl_pct": 2.2143485608170845,
+        "profit_factor": 1.5580315741271769,
+        "max_dd_pct": -8.47275,
+        "win_rate": 0.4583333333333333,
+        "avg_holding_days": 5.25,
+        "by_reason": {
+          "TIME_STOP": 50,
+          "STOP_LOSS": 30,
+          "TAKE_PROFIT": 14,
+          "TRAILING_STOP": 2
+        }
+      },
+      "is_top5": [
+        {
+          "tag": "TP0.06/ATR3.0/TS5",
+          "is_monthly": 2.21,
+          "is_pf": 1.56
+        },
+        {
+          "tag": "TP0.06/ATR2.5/TS5",
+          "is_monthly": 1.92,
+          "is_pf": 1.49
+        },
+        {
+          "tag": "TP0.05/ATR3.0/TS5",
+          "is_monthly": 1.8,
+          "is_pf": 1.46
+        },
+        {
+          "tag": "TP0.05/ATR3.0/TS7",
+          "is_monthly": 1.66,
+          "is_pf": 1.45
+        },
+        {
+          "tag": "TP0.05/ATR2.5/TS5",
+          "is_monthly": 1.65,
+          "is_pf": 1.42
+        }
+      ],
+      "oos": {
+        "trades": 98,
+        "monthly_pnl_pct": 0.9825473684210526,
+        "profit_factor": 1.2239330182568433,
+        "max_dd_pct": -13.568791666666666,
+        "win_rate": 0.4387755102040816,
+        "avg_holding_days": 4.785714285714286,
+        "by_reason": {
+          "TAKE_PROFIT": 17,
+          "STOP_LOSS": 46,
+          "TIME_STOP": 34,
+          "TRAILING_STOP": 1
+        }
+      },
+      "robust": true,
+      "elapsed_sec": 39.9
+    },
+    {
+      "label": "W3",
+      "is_period": "2024-01-04..2024-12-30",
+      "oos_period": "2025-01-06..2025-12-30",
+      "is_best_params": {
+        "target_profit": 10.0,
+        "atr_mult": 2.5,
+        "rsi_upper": 45,
+        "rsi_lower": null,
+        "time_stop": 5,
+        "price_max": 3000,
+        "max_positions": 2,
+        "signal": "ma_cross"
+      },
+      "is_best": {
+        "trades": 91,
+        "monthly_pnl_pct": 4.263540350877193,
+        "profit_factor": 2.03291252653242,
+        "max_dd_pct": -10.680625000000001,
+        "win_rate": 0.4725274725274725,
+        "avg_holding_days": 5.43956043956044,
+        "by_reason": {
+          "STOP_LOSS": 39,
+          "TIME_STOP": 45,
+          "TRAILING_STOP": 7
+        }
+      },
+      "is_top5": [
+        {
+          "tag": "noTP/ATR2.5/TS5",
+          "is_monthly": 4.26,
+          "is_pf": 2.03
+        },
+        {
+          "tag": "noTP/ATR3.0/TS5",
+          "is_monthly": 3.07,
+          "is_pf": 1.69
+        },
+        {
+          "tag": "noTP/ATR2.0/TS5",
+          "is_monthly": 3.05,
+          "is_pf": 1.68
+        },
+        {
+          "tag": "noTP/ATR2.5/TS7",
+          "is_monthly": 2.62,
+          "is_pf": 1.58
+        },
+        {
+          "tag": "TP0.05/ATR1.5/TS7",
+          "is_monthly": 2.24,
+          "is_pf": 1.49
+        }
+      ],
+      "oos": {
+        "trades": 97,
+        "monthly_pnl_pct": 1.7794366852886405,
+        "profit_factor": 1.4150624956156097,
+        "max_dd_pct": -8.862125,
+        "win_rate": 0.44329896907216493,
+        "avg_holding_days": 5.577319587628866,
+        "by_reason": {
+          "STOP_LOSS": 38,
+          "TRAILING_STOP": 4,
+          "TIME_STOP": 55
+        }
+      },
+      "robust": true,
+      "elapsed_sec": 39.0
+    }
+  ],
+  "summary": {
+    "robust": "3/3",
+    "oos_avg_monthly_pct": 1.029
+  }
+}
