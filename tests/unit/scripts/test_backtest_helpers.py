@@ -193,12 +193,11 @@ class TestApplyParamOverridesIdempotency:
         assert position_manager.compute_take_profit_price(
             Decimal("100")) == Decimal("100") * Decimal("1.03")
 
-        # None に戻すと pristine の関数オブジェクトに戻る
+        # None に戻すと pristine の関数オブジェクトに戻る（デフォルトは TP なし = None）
         _apply_param_overrides(_ns())
         assert quantity_calculator.compute_take_profit_price \
             is position_manager.compute_take_profit_price
-        assert quantity_calculator.compute_take_profit_price(
-            Decimal("100")) == Decimal("100") * Decimal("1.05")
+        assert quantity_calculator.compute_take_profit_price(Decimal("100")) is None
 
 
 # ── _find_compatible_cache_path ────────────────────────────────────────────────

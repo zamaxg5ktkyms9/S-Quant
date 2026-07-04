@@ -127,21 +127,25 @@ class TestComputeStopLossPrice:
 
 
 class TestComputeTakeProfitPrice:
-    def test_default_no_spread_at_5pct(self):
-        # 単元株+ゼロ革命: spread=0 で TP = entry × 1.05 (W1best)
-        tp = compute_take_profit_price(Decimal("500"))
+    def test_default_tp_disabled_returns_none(self):
+        # 2026-07-05: 本番デフォルトは TP なし（TARGET_PROFIT_RATE=None）
+        assert compute_take_profit_price(Decimal("500")) is None
+
+    def test_explicit_rate_5pct(self):
+        # rate を明示すれば従来どおり計算される（grid search 用の後方互換）
+        tp = compute_take_profit_price(Decimal("500"), Decimal("0.05"))
         assert float(tp) == pytest.approx(500 * 1.05, rel=1e-6)
 
     def test_tp_above_entry(self):
         entry = Decimal("900")
-        tp = compute_take_profit_price(entry)
+        tp = compute_take_profit_price(entry, Decimal("0.05"))
         assert tp > entry
 
     def test_explicit_spread_rounds_higher(self):
-        """スプレッドを明示すると TP は素の+5%より高くなる（互換性）。"""
+        """スプレッドを明示すると TP は素の rate より高くなる（互換性）。"""
         entry = Decimal("500")
-        tp_no_spread = compute_take_profit_price(entry, spread_rate=Decimal("0"))
-        tp_with_spread = compute_take_profit_price(entry, spread_rate=Decimal("0.005"))
+        tp_no_spread = compute_take_profit_price(entry, Decimal("0.05"), spread_rate=Decimal("0"))
+        tp_with_spread = compute_take_profit_price(entry, Decimal("0.05"), spread_rate=Decimal("0.005"))
         assert tp_with_spread > tp_no_spread
 
 

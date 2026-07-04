@@ -31,12 +31,16 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from backtest import load_cache as _load_cache_for_backtest  # noqa: E402
 from backtest import precompute_daily_candidates, run_one_backtest  # noqa: E402
 
-# パラメータ Grid（180通り = 5×3×4×3）
+# パラメータ Grid（96通り = 6×4×1×4、2026-07-05 拡張版）
+# - target_profit 10.0 は「TP なし」の番兵値（entry×11 は到達不能）
+# - rsi_upper は C 戦略（ma_cross）ではフィルタ未使用のため 1 水準に縮退
+# - 旧 180 通り版（TP≤6%・TS≤7・RSI 4水準）は §8.13 以前の再現用に git 履歴参照
+NO_TP_SENTINEL = 10.0
 GRID = {
-    "target_profit": [0.02, 0.03, 0.04, 0.05, 0.06],
-    "atr_mult":      [1.5, 2.0, 2.5],
-    "rsi_upper":     [45, 50, 55, 60],
-    "time_stop":     [3, 5, 7],
+    "target_profit": [0.04, 0.05, 0.06, 0.08, 0.10, NO_TP_SENTINEL],
+    "atr_mult":      [1.5, 2.0, 2.5, 3.0],
+    "rsi_upper":     [45],
+    "time_stop":     [5, 7, 10, 15],
 }
 
 

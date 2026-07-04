@@ -49,13 +49,17 @@ def compute_stop_loss_price(entry_price: Decimal, stop_loss_rate: Decimal) -> De
 
 def compute_take_profit_price(
     entry_price: Decimal,
-    target_net_rate: Decimal = TARGET_PROFIT_RATE,
+    target_net_rate: Decimal | None = TARGET_PROFIT_RATE,
     spread_rate: Decimal = EXECUTION_SPREAD_RATE,
-) -> Decimal:
-    """利確価格。単元株+ゼロ革命でspread_rate=0なら entry × (1+target) と等価。
+) -> Decimal | None:
+    """利確価格。target_net_rate が None（本番デフォルト）なら利確なし＝None を返す。
 
-    保守的に旧S株式（両端スプレッド補正）も維持しておくが、デフォルトでは0で計算される。
+    2026-07-05: トレンドフォロー（C 戦略）では固定利確が勝ちトレードを
+    切ってしまうため TP を廃止。出口はトレーリング/タイム/ハードストップのみ。
+    単元株+ゼロ革命で spread_rate=0 なら entry × (1+target) と等価。
     """
+    if target_net_rate is None:
+        return None
     if spread_rate == 0:
         return entry_price * (1 + target_net_rate)
     return entry_price * (1 + spread_rate) * (1 + target_net_rate) / (1 - spread_rate)

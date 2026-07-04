@@ -91,7 +91,7 @@ def format_exit_signal(ticker: str, exit_decision: ExitDecision, current_close: 
         ExitReason.STOP_LOSS: ":red_circle: 損切（ハードストップ）",
         ExitReason.TRAILING_STOP: ":orange_circle: トレイリングストップ",
         ExitReason.TIME_STOP: ":hourglass: タイムストップ（5営業日経過）",
-        ExitReason.TAKE_PROFIT: ":white_check_mark: 利確（スプレッド後純利益+7%）",
+        ExitReason.TAKE_PROFIT: ":white_check_mark: 利確",
         ExitReason.MANUAL: ":blue_circle: 手動決済",
     }
     reason_label = reason_map.get(exit_decision.reason, str(exit_decision.reason))

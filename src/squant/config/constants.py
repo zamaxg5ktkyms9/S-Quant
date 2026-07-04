@@ -2,7 +2,7 @@ from decimal import Decimal
 
 # --- Universe filters (Phase 1) ---
 PRICE_MIN = Decimal("100")
-PRICE_MAX = Decimal("1000")                # Phase 1: 単元株100株×¥1,000 = ¥100,000 制約
+PRICE_MAX = Decimal("3000")                # ¥600,000 ÷ 2銘柄 ÷ 100株 = ¥3,000（2026-07-05 予算¥600k採用）
 MARKET_CAP_MIN_JPY = 3_000_000_000         # ¥3 billion
 LIQUIDITY_MIN_JPY = 100_000_000            # ¥100 million (5-day avg trading value)
 PBR_MIN = 0.5
@@ -36,19 +36,21 @@ GAP_UP_CANCEL_THRESHOLD = Decimal("0.02")  # cancel if open > prev_close * 1.02
 SLIPPAGE_BUFFER = Decimal("0.02")          # 2% — same as gap-up threshold
 SHARES_PER_UNIT = 100                      # 単元株（100株単位）
 
-# --- Exit rules (W1best: C-WF 2022 IS選定、2023-25 純粋OOS検証済み。backtest_report §8.12) ---
-STOP_LOSS_RATE = Decimal("0.025")          # -2.5% from entry (OCO逆指値で執行)
-ATR_TRAILING_MULTIPLIER = Decimal("2.5")   # 2.5× ATR（旧A1ベスト1.5はC戦略でOOS劣後→W1bestの2.5へ）
+# --- Exit rules (¥600k採用値: 拡張グリッド検証 2026-07-05、backtest_report §8.14) ---
+# noTP/ATR3.0/TS5: 4年固定適用で 平均+1.40%/月・最悪DD-13.1%・minPF0.99。
+# トレンドフォローでは固定利確が勝ちを削るため TP を廃止（出口=トレーリング/タイム/ハードストップ）。
+STOP_LOSS_RATE = Decimal("0.025")          # -2.5% from entry (逆指値で執行)
+ATR_TRAILING_MULTIPLIER = Decimal("3.0")   # 3.0× ATR（TPなし運用では広いトレールで利を伸ばす）
 ATR_PERIOD = 14
-TIME_STOP_TRADING_DAYS = 5                 # 3/5/7で大差なし、5日が安定（W1bestも5）
-TARGET_PROFIT_RATE = Decimal("0.05")       # +5.0% take-profit (W1best: 2022 IS選定→2023-25 OOS平均+0.54%/月、backtest_report §8.12)
+TIME_STOP_TRADING_DAYS = 5                 # 5日が全窓で安定
+TARGET_PROFIT_RATE: Decimal | None = None  # None = 利確注文なし（旧: 0.05。grid では sentinel 10.0 で「なし」を表現）
 
 # --- Risk management ---
-CIRCUIT_BREAKER_LOSS_JPY = Decimal("30000")    # Phase 1: 投資資本¥200,000 × 15%（判定はこの絶対額）
-CIRCUIT_BREAKER_LOSS_RATE = Decimal("0.15")    # 全 Phase 共通 15%（情報用。判定は LOSS_JPY）
+CIRCUIT_BREAKER_LOSS_JPY = Decimal("90000")    # 投資資本¥600,000 × 15%（判定はこの絶対額）
+CIRCUIT_BREAKER_LOSS_RATE = Decimal("0.15")    # 15%（情報用。判定は LOSS_JPY）
 
 # --- Capital ---
-DEFAULT_BUDGET_JPY = Decimal("100000")
+DEFAULT_BUDGET_JPY = Decimal("300000")     # 1銘柄あたり予算の既定値（¥600,000 ÷ 2銘柄）
 
 # --- Diversification (B phase, 2026-05-25) ---
 # Phase 1 keeps 2 to preserve a usable universe under ¥100k / 100sh / 2 = ¥500 price cap.

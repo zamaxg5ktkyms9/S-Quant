@@ -40,6 +40,17 @@ def make_ohlcv(n: int = 20, base: float = 500.0) -> tuple[pd.Series, pd.Series, 
     return high, low, close
 
 
+@pytest.fixture
+def tp_5pct(monkeypatch):
+    """TP を +5% で有効化する（本番デフォルトは TP なしのため、TP ロジック検証用）。"""
+    import squant.domain.position_manager as pm
+
+    monkeypatch.setattr(
+        pm, "compute_take_profit_price",
+        lambda entry, target_net_rate=None, spread_rate=None: entry * Decimal("1.05"),
+    )
+
+
 # ── 終値モード（intraday_*=None）────────────────────────────────────────────
 
 class TestTimeStopCloseMode:
@@ -76,22 +87,28 @@ class TestStopLossCloseMode:
 
 
 class TestTakeProfitCloseMode:
-    def test_take_profit_price_is_5pct_above_entry(self):
-        entry = Decimal("500")
-        tp = compute_take_profit_price(entry)
-        # 単元株+ゼロ革命: spread=0 → entry × 1.05 = 525
-        assert float(tp) == pytest.approx(525.0, rel=1e-6)
+    def test_default_tp_disabled(self):
+        # 2026-07-05: 本番デフォルトは TP なし
+        assert compute_take_profit_price(Decimal("500")) is None
 
-    def test_exit_at_take_profit(self):
+    def test_tp_never_fires_when_disabled(self):
+        """TP 無効（デフォルト）では価格が大きく上でも TAKE_PROFIT にならない。"""
         pos = make_position(entry_price=500.0)
-        tp_price = compute_take_profit_price(pos.entry_price)
+        high, low, close = make_ohlcv(base=560.0)  # +12%
+        decision = evaluate_exit(pos, date(2026, 5, 11), Decimal("560"), high, low, close)
+        if decision.should_exit:
+            assert decision.reason != ExitReason.TAKE_PROFIT
+
+    def test_exit_at_take_profit(self, tp_5pct):
+        pos = make_position(entry_price=500.0)
+        tp_price = pos.entry_price * Decimal("1.05")  # 525
         exit_price = Decimal(str(round(float(tp_price) + 1.0, 1)))
         high, low, close = make_ohlcv(base=float(exit_price))
         decision = evaluate_exit(pos, date(2026, 5, 11), exit_price, high, low, close)
         assert decision.should_exit
         assert decision.reason == ExitReason.TAKE_PROFIT
 
-    def test_no_exit_below_take_profit(self):
+    def test_no_exit_below_take_profit(self, tp_5pct):
         pos = make_position(entry_price=500.0)
         price = Decimal("520")  # +4%、TP(525)未満
         high, low, close = make_ohlcv(base=float(price))
@@ -116,8 +133,8 @@ class TestIntradayMode:
         assert decision.reason == ExitReason.STOP_LOSS
         assert decision.exit_price == pos.stop_loss_price
 
-    def test_intraday_high_triggers_tp_at_tp_price(self):
-        """日中高値が利確価格に到達したら、利確価格で約定。"""
+    def test_intraday_high_triggers_tp_at_tp_price(self, tp_5pct):
+        """日中高値が利確価格に到達したら、利確価格で約定（TP有効時）。"""
         pos = make_position(entry_price=500.0)
         # 終値¥520だが日中高値¥532でTP(525)発動
         high, low, close = make_ohlcv(base=520.0)
@@ -127,7 +144,7 @@ class TestIntradayMode:
         )
         assert decision.should_exit
         assert decision.reason == ExitReason.TAKE_PROFIT
-        assert decision.exit_price == compute_take_profit_price(pos.entry_price)
+        assert decision.exit_price == pos.entry_price * Decimal("1.05")
 
     def test_intraday_no_trigger_when_in_range(self):
         """日中の高安がストップにもTPにも触れない場合は継続。"""
@@ -141,7 +158,7 @@ class TestIntradayMode:
 
 
 class TestExitPriority:
-    def test_stop_loss_beats_take_profit_in_intraday(self):
+    def test_stop_loss_beats_take_profit_in_intraday(self, tp_5pct):
         """同日にlow≤stopとhigh≥tpが両方成立 → 保守的にストップ優先。"""
         pos = make_position(entry_price=500.0)
         high, low, close = make_ohlcv(base=510.0)
@@ -152,10 +169,10 @@ class TestExitPriority:
         assert decision.should_exit
         assert decision.reason == ExitReason.STOP_LOSS
 
-    def test_take_profit_beats_time_stop(self):
-        """改訂版: ザラ場でTPに到達したらタイムストップより優先（早期に約定）。"""
+    def test_take_profit_beats_time_stop(self, tp_5pct):
+        """ザラ場でTPに到達したらタイムストップより優先（TP有効時）。"""
         pos = make_position(entry_price=500.0, entry_date=date(2026, 5, 7))
-        tp_price = compute_take_profit_price(pos.entry_price)
+        tp_price = pos.entry_price * Decimal("1.05")
         exit_price = Decimal(str(round(float(tp_price) + 1.0, 1)))
         high, low, close = make_ohlcv(base=float(exit_price))
         # 5営業日経過日にTPも同時成立 → TAKE_PROFITが優先

@@ -143,8 +143,14 @@ class TestHoldingPipelineStopLoss:
 
 
 class TestHoldingPipelineTakeProfit:
-    def test_take_profit_triggers_exit(self):
-        # entry=500, TP ≈ 540.4 (net +7%); price=545 > TP → take-profit
+    def test_take_profit_triggers_exit(self, monkeypatch):
+        """TP を有効化した場合に SETTLING へ遷移する（本番デフォルトは TP なし）。"""
+        import squant.domain.position_manager as pm
+        monkeypatch.setattr(
+            pm, "compute_take_profit_price",
+            lambda entry, target_net_rate=None, spread_rate=None: entry * Decimal("1.05"),
+        )
+        # entry=500, TP=525; price=545 > TP → take-profit
         ohlcv = _make_ohlcv_df(close_price=545.0)
         pipeline, _, notifier = _make_pipeline(fake_ohlcv=ohlcv)
         position = _make_position(entry_price=500.0)

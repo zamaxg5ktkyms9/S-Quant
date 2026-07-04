@@ -1,8 +1,8 @@
 """Position exit rule evaluation — pure business logic, no I/O.
 
-改訂版:
-- トレーリングストップ基準を「直近高値 - 2.5×ATR」に変更（ラチェット成立）
-- ザラ場約定モードを追加（intraday_high/low を渡せばOCO逆指値・指値の発動を再現）
+- トレーリングストップ基準は「直近高値 - ATR_TRAILING_MULTIPLIER×ATR」（ラチェット成立）
+- ザラ場約定モード（intraday_high/low を渡せば逆指値・指値の発動を再現）
+- TP は TARGET_PROFIT_RATE=None で無効（2026-07-05 の本番デフォルト）
 """
 
 from datetime import date
@@ -44,7 +44,7 @@ def evaluate_exit(
     Exit priority:
       1. Hard stop-loss (ザラ場発動 or 終値到達)
       2. Trailing stop (上記と同じ)
-      3. Take-profit
+      3. Take-profit（TARGET_PROFIT_RATE=None の場合はスキップ = 本番デフォルト）
       4. Time stop (5営業日経過時、終値で決済前提)
     """
     days_held = count_trading_days(position.entry_date, today)
@@ -94,22 +94,23 @@ def evaluate_exit(
             updated_trailing_stop=updated_trailing,
         )
 
-    # --- 3. 利確 ---
-    if intraday_mode and intraday_high >= tp_price:
-        return ExitDecision(
-            should_exit=True,
-            reason=ExitReason.TAKE_PROFIT,
-            note=f"Intraday high ¥{intraday_high} ≥ TP ¥{round(tp_price, 1)}",
-            updated_trailing_stop=updated_trailing,
-            exit_price=tp_price,
-        )
-    if not intraday_mode and latest_close >= tp_price:
-        return ExitDecision(
-            should_exit=True,
-            reason=ExitReason.TAKE_PROFIT,
-            note=f"Close ¥{latest_close} ≥ TP ¥{round(tp_price, 1)}",
-            updated_trailing_stop=updated_trailing,
-        )
+    # --- 3. 利確（tp_price=None なら利確なし = 本番デフォルト） ---
+    if tp_price is not None:
+        if intraday_mode and intraday_high >= tp_price:
+            return ExitDecision(
+                should_exit=True,
+                reason=ExitReason.TAKE_PROFIT,
+                note=f"Intraday high ¥{intraday_high} ≥ TP ¥{round(tp_price, 1)}",
+                updated_trailing_stop=updated_trailing,
+                exit_price=tp_price,
+            )
+        if not intraday_mode and latest_close >= tp_price:
+            return ExitDecision(
+                should_exit=True,
+                reason=ExitReason.TAKE_PROFIT,
+                note=f"Close ¥{latest_close} ≥ TP ¥{round(tp_price, 1)}",
+                updated_trailing_stop=updated_trailing,
+            )
 
     # --- 4. タイムストップ（5営業日経過）---
     # 設計上は「5日目の引け後通知→翌朝成行」だが、バックテスト簡略化として

@@ -1,0 +1,418 @@
+{
+  "budget": 600000,
+  "price_max": 3000,
+  "no_tp_sentinel": 10.0,
+  "candidates": {
+    "extW1best (TP4/ATR3.0/TS15)": {
+      "params": {
+        "target_profit": 0.04,
+        "atr_mult": 3.0,
+        "rsi_upper": 45,
+        "time_stop": 15
+      },
+      "by_year": {
+        "2022": {
+          "trades": 89,
+          "monthly_pnl_pct": 0.7799373333333333,
+          "profit_factor": 1.1613231522533354,
+          "max_dd_pct": -14.187916666666666,
+          "win_rate": 0.42696629213483145,
+          "avg_holding_days": 6.056179775280899,
+          "by_reason": {
+            "STOP_LOSS": 50,
+            "TAKE_PROFIT": 37,
+            "TIME_STOP": 2
+          }
+        },
+        "2023": {
+          "trades": 80,
+          "monthly_pnl_pct": 0.3243936861652739,
+          "profit_factor": 1.07557697935402,
+          "max_dd_pct": -12.421375,
+          "win_rate": 0.4125,
+          "avg_holding_days": 6.5375,
+          "by_reason": {
+            "STOP_LOSS": 44,
+            "TAKE_PROFIT": 29,
+            "TRAILING_STOP": 4,
+            "TIME_STOP": 3
+          }
+        },
+        "2024": {
+          "trades": 88,
+          "monthly_pnl_pct": 0.06134736842105262,
+          "profit_factor": 1.0132420437160126,
+          "max_dd_pct": -16.237,
+          "win_rate": 0.38636363636363635,
+          "avg_holding_days": 5.681818181818182,
+          "by_reason": {
+            "TAKE_PROFIT": 30,
+            "STOP_LOSS": 53,
+            "TRAILING_STOP": 2,
+            "TIME_STOP": 3
+          }
+        },
+        "2025": {
+          "trades": 73,
+          "monthly_pnl_pct": 1.7007512104283053,
+          "profit_factor": 1.4958910101533212,
+          "max_dd_pct": -6.544666666666667,
+          "win_rate": 0.5068493150684932,
+          "avg_holding_days": 8.054794520547945,
+          "by_reason": {
+            "STOP_LOSS": 29,
+            "TAKE_PROFIT": 30,
+            "TIME_STOP": 9,
+            "TRAILING_STOP": 5
+          }
+        }
+      },
+      "avg_monthly_pct_4y": 0.717,
+      "avg_monthly_pct_2023_25": 0.695,
+      "positive_years": "4/4",
+      "min_pf": 1.013,
+      "worst_dd_pct": -16.24
+    },
+    "extW2best (TP6/ATR3.0/TS5)": {
+      "params": {
+        "target_profit": 0.06,
+        "atr_mult": 3.0,
+        "rsi_upper": 45,
+        "time_stop": 5
+      },
+      "by_year": {
+        "2022": {
+          "trades": 112,
+          "monthly_pnl_pct": -0.8110192222222223,
+          "profit_factor": 0.8548166502797533,
+          "max_dd_pct": -14.708825000000003,
+          "win_rate": 0.36607142857142855,
+          "avg_holding_days": 4.598214285714286,
+          "by_reason": {
+            "STOP_LOSS": 56,
+            "TIME_STOP": 37,
+            "TAKE_PROFIT": 16,
+            "TRAILING_STOP": 3
+          }
+        },
+        "2023": {
+          "trades": 96,
+          "monthly_pnl_pct": 2.2143485608170845,
+          "profit_factor": 1.5580315741271769,
+          "max_dd_pct": -8.47275,
+          "win_rate": 0.4583333333333333,
+          "avg_holding_days": 5.25,
+          "by_reason": {
+            "TIME_STOP": 50,
+            "STOP_LOSS": 30,
+            "TAKE_PROFIT": 14,
+            "TRAILING_STOP": 2
+          }
+        },
+        "2024": {
+          "trades": 98,
+          "monthly_pnl_pct": 0.9825473684210526,
+          "profit_factor": 1.2239330182568433,
+          "max_dd_pct": -13.568791666666666,
+          "win_rate": 0.4387755102040816,
+          "avg_holding_days": 4.785714285714286,
+          "by_reason": {
+            "TAKE_PROFIT": 17,
+            "STOP_LOSS": 46,
+            "TIME_STOP": 34,
+            "TRAILING_STOP": 1
+          }
+        },
+        "2025": {
+          "trades": 101,
+          "monthly_pnl_pct": 1.7504059590316572,
+          "profit_factor": 1.4127523385850684,
+          "max_dd_pct": -6.510958333333333,
+          "win_rate": 0.48514851485148514,
+          "avg_holding_days": 5.297029702970297,
+          "by_reason": {
+            "STOP_LOSS": 37,
+            "TIME_STOP": 50,
+            "TAKE_PROFIT": 14
+          }
+        }
+      },
+      "avg_monthly_pct_4y": 1.034,
+      "avg_monthly_pct_2023_25": 1.649,
+      "positive_years": "3/4",
+      "min_pf": 0.855,
+      "worst_dd_pct": -14.71
+    },
+    "extW3best (noTP/ATR2.5/TS5)": {
+      "params": {
+        "target_profit": 10.0,
+        "atr_mult": 2.5,
+        "rsi_upper": 45,
+        "time_stop": 5
+      },
+      "by_year": {
+        "2022": {
+          "trades": 106,
+          "monthly_pnl_pct": -0.5050094444444444,
+          "profit_factor": 0.9048367002842388,
+          "max_dd_pct": -12.28375,
+          "win_rate": 0.33962264150943394,
+          "avg_holding_days": 4.867924528301887,
+          "by_reason": {
+            "STOP_LOSS": 53,
+            "TIME_STOP": 47,
+            "TRAILING_STOP": 6
+          }
+        },
+        "2023": {
+          "trades": 91,
+          "monthly_pnl_pct": 0.8834805942432684,
+          "profit_factor": 1.2214955908226837,
+          "max_dd_pct": -14.92,
+          "win_rate": 0.4175824175824176,
+          "avg_holding_days": 5.5054945054945055,
+          "by_reason": {
+            "TIME_STOP": 52,
+            "STOP_LOSS": 31,
+            "TRAILING_STOP": 8
+          }
+        },
+        "2024": {
+          "trades": 91,
+          "monthly_pnl_pct": 4.263540350877193,
+          "profit_factor": 2.03291252653242,
+          "max_dd_pct": -10.680625000000001,
+          "win_rate": 0.4725274725274725,
+          "avg_holding_days": 5.43956043956044,
+          "by_reason": {
+            "STOP_LOSS": 39,
+            "TIME_STOP": 45,
+            "TRAILING_STOP": 7
+          }
+        },
+        "2025": {
+          "trades": 97,
+          "monthly_pnl_pct": 1.7794366852886405,
+          "profit_factor": 1.4150624956156097,
+          "max_dd_pct": -8.862125,
+          "win_rate": 0.44329896907216493,
+          "avg_holding_days": 5.577319587628866,
+          "by_reason": {
+            "STOP_LOSS": 38,
+            "TRAILING_STOP": 4,
+            "TIME_STOP": 55
+          }
+        }
+      },
+      "avg_monthly_pct_4y": 1.605,
+      "avg_monthly_pct_2023_25": 2.309,
+      "positive_years": "3/4",
+      "min_pf": 0.905,
+      "worst_dd_pct": -14.92
+    },
+    "cross (noTP/ATR3.0/TS5)": {
+      "params": {
+        "target_profit": 10.0,
+        "atr_mult": 3.0,
+        "rsi_upper": 45,
+        "time_stop": 5
+      },
+      "by_year": {
+        "2022": {
+          "trades": 105,
+          "monthly_pnl_pct": 0.6335937037037037,
+          "profit_factor": 1.1214515317512455,
+          "max_dd_pct": -13.052916666666667,
+          "win_rate": 0.38095238095238093,
+          "avg_holding_days": 4.914285714285715,
+          "by_reason": {
+            "STOP_LOSS": 52,
+            "TIME_STOP": 50,
+            "TRAILING_STOP": 3
+          }
+        },
+        "2023": {
+          "trades": 88,
+          "monthly_pnl_pct": -0.03657103064066852,
+          "profit_factor": 0.9900248776567846,
+          "max_dd_pct": -11.183124999999999,
+          "win_rate": 0.3977272727272727,
+          "avg_holding_days": 5.7272727272727275,
+          "by_reason": {
+            "TIME_STOP": 56,
+            "STOP_LOSS": 30,
+            "TRAILING_STOP": 2
+          }
+        },
+        "2024": {
+          "trades": 89,
+          "monthly_pnl_pct": 3.0748315789473684,
+          "profit_factor": 1.6860277142586502,
+          "max_dd_pct": -10.931875,
+          "win_rate": 0.449438202247191,
+          "avg_holding_days": 5.52808988764045,
+          "by_reason": {
+            "STOP_LOSS": 42,
+            "TIME_STOP": 46,
+            "TRAILING_STOP": 1
+          }
+        },
+        "2025": {
+          "trades": 96,
+          "monthly_pnl_pct": 1.9260091247672253,
+          "profit_factor": 1.4441038761422793,
+          "max_dd_pct": -7.984166666666667,
+          "win_rate": 0.46875,
+          "avg_holding_days": 5.697916666666667,
+          "by_reason": {
+            "STOP_LOSS": 38,
+            "TIME_STOP": 58
+          }
+        }
+      },
+      "avg_monthly_pct_4y": 1.399,
+      "avg_monthly_pct_2023_25": 1.655,
+      "positive_years": "3/4",
+      "min_pf": 0.99,
+      "worst_dd_pct": -13.05
+    },
+    "cross (noTP/ATR3.0/TS10)": {
+      "params": {
+        "target_profit": 10.0,
+        "atr_mult": 3.0,
+        "rsi_upper": 45,
+        "time_stop": 10
+      },
+      "by_year": {
+        "2022": {
+          "trades": 69,
+          "monthly_pnl_pct": 0.711272037037037,
+          "profit_factor": 1.154396596035888,
+          "max_dd_pct": -17.946416666666668,
+          "win_rate": 0.30434782608695654,
+          "avg_holding_days": 8.420289855072463,
+          "by_reason": {
+            "STOP_LOSS": 44,
+            "TIME_STOP": 22,
+            "TRAILING_STOP": 3
+          }
+        },
+        "2023": {
+          "trades": 64,
+          "monthly_pnl_pct": 0.21684345403899719,
+          "profit_factor": 1.0575224303596533,
+          "max_dd_pct": -12.301291666666666,
+          "win_rate": 0.34375,
+          "avg_holding_days": 8.796875,
+          "by_reason": {
+            "STOP_LOSS": 35,
+            "TIME_STOP": 20,
+            "TRAILING_STOP": 9
+          }
+        },
+        "2024": {
+          "trades": 65,
+          "monthly_pnl_pct": 1.0164561403508772,
+          "profit_factor": 1.2769508163495533,
+          "max_dd_pct": -12.728833333333334,
+          "win_rate": 0.27692307692307694,
+          "avg_holding_days": 8.415384615384616,
+          "by_reason": {
+            "STOP_LOSS": 39,
+            "TIME_STOP": 22,
+            "TRAILING_STOP": 4
+          }
+        },
+        "2025": {
+          "trades": 63,
+          "monthly_pnl_pct": 0.8427260707635008,
+          "profit_factor": 1.278132185216714,
+          "max_dd_pct": -8.509333333333334,
+          "win_rate": 0.42857142857142855,
+          "avg_holding_days": 9.380952380952381,
+          "by_reason": {
+            "STOP_LOSS": 29,
+            "TIME_STOP": 27,
+            "TRAILING_STOP": 7
+          }
+        }
+      },
+      "avg_monthly_pct_4y": 0.697,
+      "avg_monthly_pct_2023_25": 0.692,
+      "positive_years": "4/4",
+      "min_pf": 1.058,
+      "worst_dd_pct": -17.95
+    },
+    "現行prod (TP5/ATR2.5/TS5)": {
+      "params": {
+        "target_profit": 0.05,
+        "atr_mult": 2.5,
+        "rsi_upper": 45,
+        "time_stop": 5
+      },
+      "by_year": {
+        "2022": {
+          "trades": 116,
+          "monthly_pnl_pct": -1.2575853703703703,
+          "profit_factor": 0.7781465483262873,
+          "max_dd_pct": -18.973375,
+          "win_rate": 0.35344827586206895,
+          "avg_holding_days": 4.336206896551724,
+          "by_reason": {
+            "STOP_LOSS": 59,
+            "TIME_STOP": 34,
+            "TRAILING_STOP": 5,
+            "TAKE_PROFIT": 18
+          }
+        },
+        "2023": {
+          "trades": 96,
+          "monthly_pnl_pct": 1.6484837511606316,
+          "profit_factor": 1.4229365081520386,
+          "max_dd_pct": -11.983958333333334,
+          "win_rate": 0.4583333333333333,
+          "avg_holding_days": 5.21875,
+          "by_reason": {
+            "TIME_STOP": 46,
+            "STOP_LOSS": 30,
+            "TAKE_PROFIT": 16,
+            "TRAILING_STOP": 4
+          }
+        },
+        "2024": {
+          "trades": 103,
+          "monthly_pnl_pct": 0.759859649122807,
+          "profit_factor": 1.1577448373820884,
+          "max_dd_pct": -14.291041666666668,
+          "win_rate": 0.42718446601941745,
+          "avg_holding_days": 4.446601941747573,
+          "by_reason": {
+            "TAKE_PROFIT": 21,
+            "STOP_LOSS": 48,
+            "TRAILING_STOP": 6,
+            "TIME_STOP": 28
+          }
+        },
+        "2025": {
+          "trades": 105,
+          "monthly_pnl_pct": 1.5254204841713221,
+          "profit_factor": 1.346138406548764,
+          "max_dd_pct": -7.0451250000000005,
+          "win_rate": 0.45714285714285713,
+          "avg_holding_days": 5.038095238095238,
+          "by_reason": {
+            "STOP_LOSS": 40,
+            "TRAILING_STOP": 4,
+            "TIME_STOP": 44,
+            "TAKE_PROFIT": 17
+          }
+        }
+      },
+      "avg_monthly_pct_4y": 0.669,
+      "avg_monthly_pct_2023_25": 1.311,
+      "positive_years": "3/4",
+      "min_pf": 0.778,
+      "worst_dd_pct": -18.97
+    }
+  }
+}

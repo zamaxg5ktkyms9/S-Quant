@@ -878,7 +878,7 @@ def _scan_from_precomputed(state: BacktestState, today: date, ranked: list) -> N
 def run_one_backtest(
     start: date, end: date, data: dict,
     *,
-    budget: int = 200_000,
+    budget: int = 600_000,
     max_positions: int = DEFAULT_MAX_POSITIONS,
     signal_strategy: str = "ma_cross",
     target_profit: float | None = None,
@@ -994,8 +994,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="S-Quant バックテスト（改訂版・単元株・ザラ場モード）")
     parser.add_argument("--start", default="2024-01-04", help="開始日 YYYY-MM-DD")
     parser.add_argument("--end",   default="2025-12-30", help="終了日 YYYY-MM-DD")
-    parser.add_argument("--budget", type=int, default=200_000,
-                        help="初期資本 (default: 200000 = Phase 1、in-process API と共通)")
+    parser.add_argument("--budget", type=int, default=600_000,
+                        help="初期資本 (default: 600000 = 2026-07-05 採用、in-process API と共通)")
     parser.add_argument("--rpm", type=int, default=30, help="J-Quants RPM (default: 30)")
     parser.add_argument("--verbose", action="store_true", help="毎日のフィルタ結果を表示")
     parser.add_argument("--cache-dir", default=".backtest_cache", help="データキャッシュ保存先")
