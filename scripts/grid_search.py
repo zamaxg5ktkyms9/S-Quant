@@ -44,6 +44,7 @@ def run_one(
     params: dict, start: str, end: str,
     budget: int | None = None, max_positions: int | None = None,
     timeout: int = 120, signal: str | None = None,
+    price_max: float | None = None,
 ) -> dict | None:
     """1組合せ実行。stdoutから __METRICS_JSON__ 行を抽出して返す。"""
     cmd = [
@@ -61,6 +62,8 @@ def run_one(
         cmd += ["--max-positions", str(max_positions)]
     if signal is not None:
         cmd += ["--signal", signal]
+    if price_max is not None:
+        cmd += ["--price-max", str(price_max)]
     try:
         result = subprocess.run(
             cmd,
@@ -92,14 +95,15 @@ class InProcessGridRunner:
     def __init__(
         self, data: dict, *,
         budget: int | None = None, max_positions: int | None = None,
-        signal: str | None = None,
+        signal: str | None = None, price_max: float | None = None,
     ) -> None:
         self.data = data
         self.budget = budget
         self.max_positions = max_positions
         self.signal = signal
+        self.price_max = price_max
         # 日次候補リストの memo。候補は出口パラメータに依存しないため、
-        # ma_cross は (期間) 単位で、pullback は (期間, RSI帯) 単位で共有できる。
+        # ma_cross は (期間, price_max) 単位で、pullback はさらに RSI 帯単位で共有できる。
         self._candidates_memo: dict[tuple, dict] = {}
 
     def _effective_signal(self) -> str:
@@ -109,10 +113,11 @@ class InProcessGridRunner:
         from datetime import date as _date
         signal = self._effective_signal()
         if signal == "ma_cross":
-            key: tuple = (start, end, signal)
+            key: tuple = (start, end, signal, self.price_max)
             rsi_kwargs: dict = {}
         else:  # pullback は RSI 帯がシグナル条件に入る
-            key = (start, end, signal, params.get("rsi_upper"), params.get("rsi_lower"))
+            key = (start, end, signal, self.price_max,
+                   params.get("rsi_upper"), params.get("rsi_lower"))
             rsi_kwargs = {
                 "rsi_upper": params.get("rsi_upper"),
                 "rsi_lower": params.get("rsi_lower"),
@@ -121,7 +126,7 @@ class InProcessGridRunner:
         if pre is None:
             pre = precompute_daily_candidates(
                 _date.fromisoformat(start), _date.fromisoformat(end), self.data,
-                signal_strategy=signal, **rsi_kwargs,
+                signal_strategy=signal, price_max=self.price_max, **rsi_kwargs,
             )
             self._candidates_memo[key] = pre
         return pre
@@ -143,6 +148,7 @@ class InProcessGridRunner:
                 rsi_upper=params.get("rsi_upper"),
                 rsi_lower=params.get("rsi_lower"),
                 time_stop=params.get("time_stop"),
+                price_max=self.price_max,
                 precomputed_candidates=self._precomputed_for(params, start, end),
                 **kwargs,
             )
@@ -165,9 +171,10 @@ def load_cache_for_grid(start: str, end: str, cache_dir: str = ".backtest_cache"
 
 
 def _runner(args_tuple):
-    params, start, end, budget, max_positions, signal = args_tuple
+    params, start, end, budget, max_positions, signal, price_max = args_tuple
     return params, run_one(
         params, start, end, budget=budget, max_positions=max_positions, signal=signal,
+        price_max=price_max,
     )
 
 
@@ -187,6 +194,8 @@ def main() -> None:
                         help="同時保有銘柄数の上限。指定しなければ backtest.py のデフォルト")
     parser.add_argument("--signal", choices=["pullback", "ma_cross"], default=None,
                         help="シグナル種別。指定しなければ backtest.py のデフォルト")
+    parser.add_argument("--price-max", type=float, default=None,
+                        help="スクリーニング株価上限を上書き (例: 2000 = 予算¥400k想定)")
     args = parser.parse_args()
 
     keys = list(GRID.keys())
@@ -211,6 +220,7 @@ def main() -> None:
         data = load_cache_for_grid(args.start, args.end)
         runner = InProcessGridRunner(
             data, budget=args.budget, max_positions=args.max_positions, signal=args.signal,
+            price_max=args.price_max,
         )
         for c in combos:
             metrics = runner.run(c, args.start, args.end)
@@ -225,7 +235,8 @@ def main() -> None:
             futures = {
                 ex.submit(
                     _runner,
-                    (c, args.start, args.end, args.budget, args.max_positions, args.signal),
+                    (c, args.start, args.end, args.budget, args.max_positions,
+                     args.signal, args.price_max),
                 ): c
                 for c in combos
             }

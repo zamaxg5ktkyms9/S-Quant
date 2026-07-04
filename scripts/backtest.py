@@ -503,6 +503,7 @@ def _apply_param_overrides(args: argparse.Namespace) -> None:
     import squant.config.constants as C
     import squant.domain.position_manager as PM
     import squant.domain.quantity_calculator as QC
+    import squant.domain.screener as SC
     import squant.domain.signal_engine as SE
 
     if _PRISTINE_PARAMS is None:
@@ -512,6 +513,7 @@ def _apply_param_overrides(args: argparse.Namespace) -> None:
             "RSI_BUY_UPPER": C.RSI_BUY_UPPER,
             "RSI_BUY_LOWER": C.RSI_BUY_LOWER,
             "TIME_STOP_TRADING_DAYS": C.TIME_STOP_TRADING_DAYS,
+            "PRICE_MAX": C.PRICE_MAX,
             "compute_take_profit_price": QC.compute_take_profit_price,
         }
     p = _PRISTINE_PARAMS
@@ -520,6 +522,7 @@ def _apply_param_overrides(args: argparse.Namespace) -> None:
     C.RSI_BUY_UPPER = SE.RSI_BUY_UPPER = p["RSI_BUY_UPPER"]
     C.RSI_BUY_LOWER = SE.RSI_BUY_LOWER = p["RSI_BUY_LOWER"]
     C.TIME_STOP_TRADING_DAYS = PM.TIME_STOP_TRADING_DAYS = p["TIME_STOP_TRADING_DAYS"]
+    C.PRICE_MAX = SC.PRICE_MAX = p["PRICE_MAX"]
     QC.compute_take_profit_price = p["compute_take_profit_price"]
     PM.compute_take_profit_price = p["compute_take_profit_price"]
 
@@ -551,11 +554,19 @@ def _apply_param_overrides(args: argparse.Namespace) -> None:
         C.TIME_STOP_TRADING_DAYS = int(args.time_stop)
         PM.TIME_STOP_TRADING_DAYS = int(args.time_stop)
 
+    # price_max は後付け引数のため、古い Namespace（属性なし）でも動くよう getattr
+    price_max = getattr(args, "price_max", None)
+    if price_max is not None:
+        pm_dec = Decimal(str(price_max))
+        C.PRICE_MAX = pm_dec
+        SC.PRICE_MAX = pm_dec
+
 
 def _restore_param_defaults() -> None:
     """全パラメータを pristine に戻す（in-process 実行後のグローバル衛生用）。"""
     _apply_param_overrides(argparse.Namespace(
         target_profit=None, atr_mult=None, rsi_upper=None, rsi_lower=None, time_stop=None,
+        price_max=None,
     ))
 
 
@@ -768,15 +779,17 @@ def precompute_daily_candidates(
     signal_strategy: str = "ma_cross",
     rsi_upper: float | None = None,
     rsi_lower: float | None = None,
+    price_max: float | None = None,
     universe: list[str] | None = None,
 ) -> dict[date, list]:
     """日次の「ランク済み全候補リスト」を一括計算する（グリッド全セルで再利用可）。
 
     スクリーニング・シグナル検出・ランキング順位は出口パラメータ
     （target_profit / atr_mult / time_stop）に依存しない。依存するのは
-    signal 種別と、pullback の場合のみ RSI 帯（rsi_upper / rsi_lower）。
-    したがって同一 (signal, RSI 帯) のグリッドセル間でこの結果を共有でき、
-    メインループから最重量のシグナルスキャンを排除できる。
+    signal 種別・スクリーニング価格上限（price_max）と、pullback の場合のみ
+    RSI 帯（rsi_upper / rsi_lower）。したがって同一 (signal, price_max, RSI 帯)
+    のグリッドセル間でこの結果を共有でき、メインループから最重量の
+    シグナルスキャンを排除できる。
 
     状態依存の絞り込み（保有銘柄除外・予算フィルタ・スロット数切り出し）は
     ``_scan_from_precomputed`` が per-cell で適用する。
@@ -784,6 +797,7 @@ def precompute_daily_candidates(
     _apply_param_overrides(argparse.Namespace(
         target_profit=None, atr_mult=None,
         rsi_upper=rsi_upper, rsi_lower=rsi_lower, time_stop=None,
+        price_max=price_max,
     ))
     if universe is None:
         universe = load_universe()
@@ -872,6 +886,7 @@ def run_one_backtest(
     rsi_upper: float | None = None,
     rsi_lower: float | None = None,
     time_stop: int | None = None,
+    price_max: float | None = None,
     universe: list[str] | None = None,
     precomputed_candidates: dict[date, list] | None = None,
 ) -> dict:
@@ -893,6 +908,7 @@ def run_one_backtest(
         rsi_upper=rsi_upper,
         rsi_lower=rsi_lower,
         time_stop=time_stop,
+        price_max=price_max,
     )
     _apply_param_overrides(args)
 
@@ -967,6 +983,7 @@ def run_one_backtest(
         "rsi_upper": rsi_upper,
         "rsi_lower": rsi_lower,
         "time_stop": time_stop,
+        "price_max": price_max,
         "max_positions": max_positions,
         "signal": signal_strategy,
     }
@@ -988,6 +1005,8 @@ def main() -> None:
     parser.add_argument("--rsi-upper", type=float, default=None, help="RSI上限 (例: 50)")
     parser.add_argument("--rsi-lower", type=float, default=None, help="RSI下限 (例: 35)")
     parser.add_argument("--time-stop", type=int, default=None, help="タイムストップ営業日 (例: 5)")
+    parser.add_argument("--price-max", type=float, default=None,
+                        help="スクリーニング株価上限を上書き (例: 2000 = 予算¥400k想定)")
     parser.add_argument("--max-positions", type=int, default=DEFAULT_MAX_POSITIONS,
                         help=f"同時保有銘柄数の上限 (default: {DEFAULT_MAX_POSITIONS} = Phase 1)")
     parser.add_argument("--signal", choices=["pullback", "ma_cross"], default="ma_cross",
@@ -1160,6 +1179,7 @@ def main() -> None:
             "rsi_upper": args.rsi_upper,
             "rsi_lower": args.rsi_lower,
             "time_stop": args.time_stop,
+            "price_max": args.price_max,
             "max_positions": args.max_positions,
             "signal": args.signal,
         }

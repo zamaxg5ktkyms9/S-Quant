@@ -124,7 +124,7 @@ class TestUpdatePbr:
 
 def _ns(**kwargs) -> argparse.Namespace:
     base = {"target_profit": None, "atr_mult": None, "rsi_upper": None,
-            "rsi_lower": None, "time_stop": None}
+            "rsi_lower": None, "time_stop": None, "price_max": None}
     base.update(kwargs)
     return argparse.Namespace(**base)
 
@@ -151,31 +151,35 @@ class TestApplyParamOverridesIdempotency:
     def test_override_then_none_restores_pristine(self, restore_params):
         """前セルの上書きが None 指定のセルに漏れない（in-process グリッドの肝）"""
         from squant.config import constants
-        from squant.domain import position_manager, signal_engine
+        from squant.domain import position_manager, screener, signal_engine
 
         pristine = (constants.TARGET_PROFIT_RATE, constants.ATR_TRAILING_MULTIPLIER,
                     constants.RSI_BUY_UPPER, constants.RSI_BUY_LOWER,
-                    constants.TIME_STOP_TRADING_DAYS)
+                    constants.TIME_STOP_TRADING_DAYS, constants.PRICE_MAX)
 
         # セルA: 全部上書き
         _apply_param_overrides(_ns(
-            target_profit=0.03, atr_mult=2.5, rsi_upper=50, rsi_lower=40, time_stop=3,
+            target_profit=0.03, atr_mult=2.0, rsi_upper=50, rsi_lower=40, time_stop=3,
+            price_max=2000,
         ))
-        assert Decimal("2.5") == constants.ATR_TRAILING_MULTIPLIER
-        assert Decimal("2.5") == position_manager.ATR_TRAILING_MULTIPLIER
+        assert Decimal("2.0") == constants.ATR_TRAILING_MULTIPLIER
+        assert Decimal("2.0") == position_manager.ATR_TRAILING_MULTIPLIER
         assert signal_engine.RSI_BUY_UPPER == 50.0
         assert position_manager.TIME_STOP_TRADING_DAYS == 3
+        assert Decimal("2000") == constants.PRICE_MAX
+        assert Decimal("2000") == screener.PRICE_MAX
 
         # セルB: 全部 None → pristine に戻ること（前セル値の残留 NG）
         _apply_param_overrides(_ns())
         restored = (constants.TARGET_PROFIT_RATE, constants.ATR_TRAILING_MULTIPLIER,
                     constants.RSI_BUY_UPPER, constants.RSI_BUY_LOWER,
-                    constants.TIME_STOP_TRADING_DAYS)
+                    constants.TIME_STOP_TRADING_DAYS, constants.PRICE_MAX)
         assert restored == pristine
         assert pristine[1] == position_manager.ATR_TRAILING_MULTIPLIER
         assert pristine[2] == signal_engine.RSI_BUY_UPPER
         assert pristine[3] == signal_engine.RSI_BUY_LOWER
         assert pristine[4] == position_manager.TIME_STOP_TRADING_DAYS
+        assert pristine[5] == screener.PRICE_MAX
 
     def test_take_profit_patch_does_not_stack(self, restore_params):
         """繰り返し呼んでも closure が多重ラップされない"""

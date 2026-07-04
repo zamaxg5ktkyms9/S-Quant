@@ -80,11 +80,11 @@ class ETAInflationAbort(Exception):
 
 
 def _runner(args_tuple):
-    params, start, end, budget, max_positions, timeout, signal = args_tuple
+    params, start, end, budget, max_positions, timeout, signal, price_max = args_tuple
     return params, run_one(
         params, start, end,
         budget=budget, max_positions=max_positions, timeout=timeout,
-        signal=signal,
+        signal=signal, price_max=price_max,
     )
 
 
@@ -97,6 +97,7 @@ def grid_search_period(
     combos_override: list[dict] | None = None,
     signal: str | None = None,
     runner: InProcessGridRunner | None = None,
+    price_max: float | None = None,
 ) -> list[dict]:
     """指定期間で grid search を実行し、結果リストを返す。
 
@@ -178,7 +179,7 @@ def grid_search_period(
             metrics = run_one(
                 c, start, end,
                 budget=budget, max_positions=max_positions, timeout=subprocess_timeout,
-                signal=signal,
+                signal=signal, price_max=price_max,
             )
             completed += 1
             if metrics is not None:
@@ -188,7 +189,8 @@ def grid_search_period(
     else:
         with ProcessPoolExecutor(max_workers=workers) as ex:
             futures = {
-                ex.submit(_runner, (c, start, end, budget, max_positions, subprocess_timeout, signal)): c
+                ex.submit(_runner, (c, start, end, budget, max_positions,
+                                    subprocess_timeout, signal, price_max)): c
                 for c in combos
             }
             try:
@@ -223,6 +225,7 @@ def evaluate_window(
     wall_clock_deadline: float | None = None,
     signal: str | None = None,
     runner: InProcessGridRunner | None = None,
+    price_max: float | None = None,
 ) -> dict | None:
     """1窓を評価して IS/OOS メトリクスと robust 判定を返す。失敗時 None。"""
     print(f"\n{'='*80}")
@@ -237,6 +240,7 @@ def evaluate_window(
         wall_clock_deadline=wall_clock_deadline,
         signal=signal,
         runner=runner,
+        price_max=price_max,
     )
     if not is_results:
         print(f"  ❌ Window {label}: IS で結果が得られず")
@@ -270,7 +274,7 @@ def evaluate_window(
         oos_metrics = run_one(
             best_params, oos_start, oos_end,
             budget=budget, max_positions=max_positions, timeout=subprocess_timeout,
-            signal=signal,
+            signal=signal, price_max=price_max,
         )
     if oos_metrics is None:
         print(f"  ❌ Window {label}: OOS バックテスト失敗")
@@ -369,7 +373,9 @@ def main() -> None:
     parser.add_argument("--benchmark", action="store_true",
                         help=f"事前ベンチ（{BENCHMARK_COMBOS} combos × 1窓）で ETA を実測してから本実行")
     parser.add_argument("--signal", choices=["pullback", "ma_cross"], default=None,
-                        help="シグナル種別を全 backtest に渡す（default: backtest.py のデフォルト=pullback）")
+                        help="シグナル種別を全 backtest に渡す（default: backtest.py のデフォルト=ma_cross）")
+    parser.add_argument("--price-max", type=float, default=None,
+                        help="スクリーニング株価上限を上書き (例: 2000 = 予算¥400k想定)")
     parser.add_argument("--out-label", default="rolling3", help="出力JSONのファイル名ラベル")
     args = parser.parse_args()
 
@@ -402,6 +408,7 @@ def main() -> None:
             sys.exit(1)
         runner = InProcessGridRunner(
             data, budget=args.budget, max_positions=args.max_positions, signal=args.signal,
+            price_max=args.price_max,
         )
     if args.budget is not None:
         print(f"Budget: ¥{args.budget:,}")
@@ -431,6 +438,7 @@ def main() -> None:
             combos_override=bench_combos,
             signal=args.signal,
             runner=runner,
+            price_max=args.price_max,
         )
         bench_elapsed = time.time() - bench_t0
         per_combo = bench_elapsed / max(BENCHMARK_COMBOS, 1)
@@ -463,6 +471,7 @@ def main() -> None:
                 wall_clock_deadline=wall_clock_deadline,
                 signal=args.signal,
                 runner=runner,
+                price_max=args.price_max,
             )
             if r is None:
                 print(f"⚠ Window {label} スキップ")
