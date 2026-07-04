@@ -1,0 +1,235 @@
+{
+  "note": "1セット固定を全年適用。候補間の最良選択は in-sample になる点に注意",
+  "candidates": {
+    "prod (TP6/ATR1.5/TS5)": {
+      "params": {
+        "target_profit": 0.06,
+        "atr_mult": 1.5,
+        "rsi_upper": 60,
+        "time_stop": 5
+      },
+      "by_year": {
+        "2022": {
+          "trades": 67,
+          "monthly_pnl_pct": -0.8976761111111111,
+          "profit_factor": 0.7374705575466834,
+          "max_dd_pct": -16.319375,
+          "win_rate": 0.29850746268656714,
+          "total_pnl": -21260.75
+        },
+        "2023": {
+          "trades": 78,
+          "monthly_pnl_pct": -0.524586295264624,
+          "profit_factor": 0.8635120322991083,
+          "max_dd_pct": -9.576625,
+          "win_rate": 0.358974358974359,
+          "total_pnl": -12389.9
+        },
+        "2024": {
+          "trades": 55,
+          "monthly_pnl_pct": 0.8749263157894738,
+          "profit_factor": 1.3276541730396254,
+          "max_dd_pct": -10.789,
+          "win_rate": 0.38181818181818183,
+          "total_pnl": 20779.5
+        },
+        "2025": {
+          "trades": 56,
+          "monthly_pnl_pct": -0.01938212290502793,
+          "profit_factor": 0.9927683741118882,
+          "max_dd_pct": -11.9765,
+          "win_rate": 0.35714285714285715,
+          "total_pnl": -456.5
+        }
+      },
+      "avg_monthly_pct": -0.142,
+      "min_monthly_pct": -0.898,
+      "positive_years": "1/4",
+      "min_pf": 0.737
+    },
+    "W1best (TP5/ATR2.5/TS5)": {
+      "params": {
+        "target_profit": 0.05,
+        "atr_mult": 2.5,
+        "rsi_upper": 45,
+        "time_stop": 5
+      },
+      "by_year": {
+        "2022": {
+          "trades": 68,
+          "monthly_pnl_pct": 0.40090000000000003,
+          "profit_factor": 1.1152445685155965,
+          "max_dd_pct": -14.254375,
+          "win_rate": 0.36764705882352944,
+          "total_pnl": 9495.0
+        },
+        "2023": {
+          "trades": 74,
+          "monthly_pnl_pct": -0.5367314763231198,
+          "profit_factor": 0.8503189507832817,
+          "max_dd_pct": -12.528375,
+          "win_rate": 0.40540540540540543,
+          "total_pnl": -12676.75
+        },
+        "2024": {
+          "trades": 53,
+          "monthly_pnl_pct": 0.5613473684210526,
+          "profit_factor": 1.2165428188573517,
+          "max_dd_pct": -13.0025,
+          "win_rate": 0.3584905660377358,
+          "total_pnl": 13332.0
+        },
+        "2025": {
+          "trades": 53,
+          "monthly_pnl_pct": 1.6084826815642457,
+          "profit_factor": 1.6334587409079508,
+          "max_dd_pct": -5.30375,
+          "win_rate": 0.49056603773584906,
+          "total_pnl": 37884.0
+        }
+      },
+      "avg_monthly_pct": 0.508,
+      "min_monthly_pct": -0.537,
+      "positive_years": "3/4",
+      "min_pf": 0.85
+    },
+    "W2best (TP4/ATR2.0/TS5)": {
+      "params": {
+        "target_profit": 0.04,
+        "atr_mult": 2.0,
+        "rsi_upper": 45,
+        "time_stop": 5
+      },
+      "by_year": {
+        "2022": {
+          "trades": 69,
+          "monthly_pnl_pct": -0.05605,
+          "profit_factor": 0.9842831518940134,
+          "max_dd_pct": -13.549249999999999,
+          "win_rate": 0.3333333333333333,
+          "total_pnl": -1327.5
+        },
+        "2023": {
+          "trades": 77,
+          "monthly_pnl_pct": -0.21547799442896937,
+          "profit_factor": 0.9366703479599932,
+          "max_dd_pct": -11.289125,
+          "win_rate": 0.42857142857142855,
+          "total_pnl": -5089.25
+        },
+        "2024": {
+          "trades": 56,
+          "monthly_pnl_pct": 0.5376463157894736,
+          "profit_factor": 1.2071812761124407,
+          "max_dd_pct": -12.999250000000002,
+          "win_rate": 0.39285714285714285,
+          "total_pnl": 12769.1
+        },
+        "2025": {
+          "trades": 52,
+          "monthly_pnl_pct": 0.4404263687150838,
+          "profit_factor": 1.1827876651982379,
+          "max_dd_pct": -8.13225,
+          "win_rate": 0.4807692307692308,
+          "total_pnl": 10373.2
+        }
+      },
+      "avg_monthly_pct": 0.177,
+      "min_monthly_pct": -0.215,
+      "positive_years": "2/4",
+      "min_pf": 0.937
+    },
+    "W3best (TP6/ATR2.0/TS3)": {
+      "params": {
+        "target_profit": 0.06,
+        "atr_mult": 2.0,
+        "rsi_upper": 45,
+        "time_stop": 3
+      },
+      "by_year": {
+        "2022": {
+          "trades": 72,
+          "monthly_pnl_pct": -0.13868944444444445,
+          "profit_factor": 0.9615777145480652,
+          "max_dd_pct": -16.274125,
+          "win_rate": 0.3194444444444444,
+          "total_pnl": -3284.75
+        },
+        "2023": {
+          "trades": 77,
+          "monthly_pnl_pct": -0.8147835097493038,
+          "profit_factor": 0.7733331762849016,
+          "max_dd_pct": -11.194625,
+          "win_rate": 0.3246753246753247,
+          "total_pnl": -19243.9
+        },
+        "2024": {
+          "trades": 58,
+          "monthly_pnl_pct": 1.6875747368421055,
+          "profit_factor": 1.630211879397775,
+          "max_dd_pct": -8.30725,
+          "win_rate": 0.39655172413793105,
+          "total_pnl": 40079.9
+        },
+        "2025": {
+          "trades": 61,
+          "monthly_pnl_pct": 0.8376558659217876,
+          "profit_factor": 1.3553686258263236,
+          "max_dd_pct": -7.414750000000001,
+          "win_rate": 0.5081967213114754,
+          "total_pnl": 19729.0
+        }
+      },
+      "avg_monthly_pct": 0.393,
+      "min_monthly_pct": -0.815,
+      "positive_years": "2/4",
+      "min_pf": 0.773
+    },
+    "consensus (TP5/ATR2.0/TS5)": {
+      "params": {
+        "target_profit": 0.05,
+        "atr_mult": 2.0,
+        "rsi_upper": 45,
+        "time_stop": 5
+      },
+      "by_year": {
+        "2022": {
+          "trades": 67,
+          "monthly_pnl_pct": -0.4854077777777777,
+          "profit_factor": 0.8614604108045575,
+          "max_dd_pct": -13.875874999999999,
+          "win_rate": 0.31343283582089554,
+          "total_pnl": -11496.5
+        },
+        "2023": {
+          "trades": 74,
+          "monthly_pnl_pct": -0.6195481894150418,
+          "profit_factor": 0.822466021007677,
+          "max_dd_pct": -12.834875,
+          "win_rate": 0.3918918918918919,
+          "total_pnl": -14632.75
+        },
+        "2024": {
+          "trades": 54,
+          "monthly_pnl_pct": 0.7549473684210526,
+          "profit_factor": 1.2946226841391777,
+          "max_dd_pct": -12.858749999999999,
+          "win_rate": 0.37037037037037035,
+          "total_pnl": 17930.0
+        },
+        "2025": {
+          "trades": 53,
+          "monthly_pnl_pct": 1.13112625698324,
+          "profit_factor": 1.4478796284621527,
+          "max_dd_pct": -7.30125,
+          "win_rate": 0.5094339622641509,
+          "total_pnl": 26641.0
+        }
+      },
+      "avg_monthly_pct": 0.195,
+      "min_monthly_pct": -0.62,
+      "positive_years": "2/4",
+      "min_pf": 0.822
+    }
+  }
+}
