@@ -36,12 +36,12 @@ GAP_UP_CANCEL_THRESHOLD = Decimal("0.02")  # cancel if open > prev_close * 1.02
 SLIPPAGE_BUFFER = Decimal("0.02")          # 2% — same as gap-up threshold
 SHARES_PER_UNIT = 100                      # 単元株（100株単位）
 
-# --- Exit rules (Grid Search 2024-2025 ベスト採用) ---
+# --- Exit rules (W1best: C-WF 2022 IS選定、2023-25 純粋OOS検証済み。backtest_report §8.12) ---
 STOP_LOSS_RATE = Decimal("0.025")          # -2.5% from entry (OCO逆指値で執行)
-ATR_TRAILING_MULTIPLIER = Decimal("1.5")   # 1.5× ATR（grid searchで2.5→1.5。狭めの方が利益確保が早い）
+ATR_TRAILING_MULTIPLIER = Decimal("2.5")   # 2.5× ATR（旧A1ベスト1.5はC戦略でOOS劣後→W1bestの2.5へ）
 ATR_PERIOD = 14
-TIME_STOP_TRADING_DAYS = 5                 # 3/5/7で大差なし、5日が安定
-TARGET_PROFIT_RATE = Decimal("0.06")       # +6.0% take-profit (単元株・SBIゼロ革命で手数料0)
+TIME_STOP_TRADING_DAYS = 5                 # 3/5/7で大差なし、5日が安定（W1bestも5）
+TARGET_PROFIT_RATE = Decimal("0.05")       # +5.0% take-profit (W1best: 2022 IS選定→2023-25 OOS平均+0.54%/月、backtest_report §8.12)
 
 # --- Risk management ---
 CIRCUIT_BREAKER_LOSS_JPY = Decimal("30000")    # Phase 1: 投資資本¥200,000 × 15%（判定はこの絶対額）

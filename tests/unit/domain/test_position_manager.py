@@ -1,4 +1,4 @@
-"""Tests for position exit rule evaluation (改訂版: 単元株・ザラ場モード・+6% TP)."""
+"""Tests for position exit rule evaluation (W1best: 単元株・ザラ場モード・+5% TP・2.5×ATR)."""
 
 from datetime import date
 from decimal import Decimal
@@ -76,11 +76,11 @@ class TestStopLossCloseMode:
 
 
 class TestTakeProfitCloseMode:
-    def test_take_profit_price_is_6pct_above_entry(self):
+    def test_take_profit_price_is_5pct_above_entry(self):
         entry = Decimal("500")
         tp = compute_take_profit_price(entry)
-        # 単元株+ゼロ革命: spread=0 → entry × 1.06 = 530
-        assert float(tp) == pytest.approx(530.0, rel=1e-6)
+        # 単元株+ゼロ革命: spread=0 → entry × 1.05 = 525
+        assert float(tp) == pytest.approx(525.0, rel=1e-6)
 
     def test_exit_at_take_profit(self):
         pos = make_position(entry_price=500.0)
@@ -93,7 +93,7 @@ class TestTakeProfitCloseMode:
 
     def test_no_exit_below_take_profit(self):
         pos = make_position(entry_price=500.0)
-        price = Decimal("520")  # +4%、TP(530)未満
+        price = Decimal("520")  # +4%、TP(525)未満
         high, low, close = make_ohlcv(base=float(price))
         decision = evaluate_exit(pos, date(2026, 5, 11), price, high, low, close)
         if decision.should_exit:
@@ -119,11 +119,11 @@ class TestIntradayMode:
     def test_intraday_high_triggers_tp_at_tp_price(self):
         """日中高値が利確価格に到達したら、利確価格で約定。"""
         pos = make_position(entry_price=500.0)
-        # 終値¥525だが日中高値¥532でTP(530)発動
-        high, low, close = make_ohlcv(base=525.0)
+        # 終値¥520だが日中高値¥532でTP(525)発動
+        high, low, close = make_ohlcv(base=520.0)
         decision = evaluate_exit(
-            pos, date(2026, 5, 11), Decimal("525"), high, low, close,
-            intraday_high=Decimal("532"), intraday_low=Decimal("523"),
+            pos, date(2026, 5, 11), Decimal("520"), high, low, close,
+            intraday_high=Decimal("532"), intraday_low=Decimal("518"),
         )
         assert decision.should_exit
         assert decision.reason == ExitReason.TAKE_PROFIT

@@ -10,20 +10,15 @@ S-Quant は日本株のシステマティック・トレーディングシステ
 - オーナー不在時は確認なしで自律的に作業を進める。確認待ちで停止しない。
 - 判断に迷った場合は「よりリスクの低い方を選んで進む」。
 
-## 許可する操作（確認不要）
-- ワークスペース内のファイル操作全般。
-- Git の全操作（`push --force` / `branch -D` を除く）。
-- 外部サイトへの GET 系フェッチ（`curl` / `wget` も GET・read-only 用途のみ）。
-- ワークスペース外のファイル参照（読み取りのみ）。
-- 参照系シェルコマンド（ls, tail, head, find, cat, grep, wc, file, stat, du, df, tree, less, more, pwd, which, type, echo, date, env, printenv, ps, jobs, history, awk, sed, curl, wget）およびプロジェクト内 `mkdir`。
-- 上記の承認省略は `.claude/settings.json`（git 管理対象・個人ローカルの settings.local.json ではない）の `permissions.allow` で管理する。引数あり/なしは別ルールで両方登録する。
+## 許可する操作（確認不要）— 2026-07-04 改定
+**原則すべての操作を承認なしで実行してよい**（`permissions.defaultMode: "dontAsk"`）。下記「承認が必要な操作」のみ例外。
+- 承認制御は `.claude/settings.json`（git 管理対象・個人ローカルの settings.local.json ではない）の `permissions` で管理する。例外は `ask` ルールとして登録する。
 
-## 禁止する操作
-- 機密ファイルの削除・Git 追加。まずワークスペース構成を確認して判断し、判断できない場合は実行しない。
-- `git push --force` / `git branch -D`。
-- 外部サービスへの POST / PUT / DELETE（書き込み系オプションを伴う curl/wget を含む）。
-- ワークスペース外へのファイル書き込み。
-- ファイルへの破壊的操作（rm / mv / `sed -i` 等）は引き続き承認を求める。
+## 承認が必要な操作（オーナー明示指定・2026-07-04）
+- **Git リポジトリの削除**（`rm -rf .git` 等）。
+- **Git 履歴の削除・改変**（`push --force` / `filter-branch` / `filter-repo` / `reflog expire` / `update-ref -d`。`branch -D` も安全側で承認制）。
+- **ワークスペース外のファイル削除**（絶対パス・ホームディレクトリ配下への rm、`sudo rm`）。
+- 機密ファイルの Git 追加は引き続き禁止。まずワークスペース構成を確認して判断し、判断できない場合は実行しない。
 
 ## タスクの受け取り方
 - 完了条件が明示されていない場合、作業開始前に自分で完了条件を定義し、Slack に送ってから着手する。

@@ -194,7 +194,7 @@ class TestApplyParamOverridesIdempotency:
         assert quantity_calculator.compute_take_profit_price \
             is position_manager.compute_take_profit_price
         assert quantity_calculator.compute_take_profit_price(
-            Decimal("100")) == Decimal("100") * Decimal("1.06")
+            Decimal("100")) == Decimal("100") * Decimal("1.05")
 
 
 # ── _find_compatible_cache_path ────────────────────────────────────────────────

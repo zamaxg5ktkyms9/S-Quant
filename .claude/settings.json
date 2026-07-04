@@ -1,5 +1,27 @@
 {
   "permissions": {
+    "defaultMode": "dontAsk",
+    "ask": [
+      "Bash(rm -rf .git)",
+      "Bash(rm -rf .git*)",
+      "Bash(rm -rf ./.git*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push origin +*)",
+      "Bash(git branch -D*)",
+      "Bash(git filter-branch*)",
+      "Bash(git filter-repo*)",
+      "Bash(git reflog expire*)",
+      "Bash(git update-ref -d*)",
+      "Bash(rm /*)",
+      "Bash(rm -r /*)",
+      "Bash(rm -rf /*)",
+      "Bash(rm ~*)",
+      "Bash(rm -r ~*)",
+      "Bash(rm -rf ~*)",
+      "Bash(rm -rf $HOME*)",
+      "Bash(sudo rm*)"
+    ],
     "allow": [
       "Bash(ls)",
       "Bash(ls *)",
