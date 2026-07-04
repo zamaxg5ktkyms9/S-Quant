@@ -1,0 +1,183 @@
+{
+  "production_params": {
+    "target_profit": 0.06,
+    "atr_mult": 1.5,
+    "rsi_upper": 60,
+    "time_stop": 5
+  },
+  "grid_size": 180,
+  "years": {
+    "2022": {
+      "elapsed_sec": 31.1,
+      "valid_combos": 180,
+      "production": {
+        "trades": 67,
+        "monthly_pnl_pct": -0.8976761111111111,
+        "profit_factor": 0.7374705575466834,
+        "max_dd_pct": -16.319375,
+        "win_rate": 0.29850746268656714,
+        "total_pnl": -21260.75,
+        "by_reason": {
+          "TRAILING_STOP": 16,
+          "TAKE_PROFIT": 6,
+          "TIME_STOP": 7,
+          "STOP_LOSS": 38
+        }
+      },
+      "production_rank_by_monthly": 124,
+      "grid_best": {
+        "params": {
+          "target_profit": 0.05,
+          "atr_mult": 2.5,
+          "rsi_upper": 45,
+          "rsi_lower": null,
+          "time_stop": 5,
+          "max_positions": 2,
+          "signal": "ma_cross"
+        },
+        "trades": 68,
+        "monthly_pnl_pct": 0.40090000000000003,
+        "profit_factor": 1.1152445685155965,
+        "max_dd_pct": -14.254375,
+        "win_rate": 0.36764705882352944,
+        "total_pnl": 9495.0,
+        "by_reason": {
+          "TIME_STOP": 14,
+          "TAKE_PROFIT": 14,
+          "TRAILING_STOP": 2,
+          "STOP_LOSS": 38
+        }
+      },
+      "grid_median_monthly_pnl_pct": -0.8253853333333333
+    },
+    "2023": {
+      "elapsed_sec": 37.7,
+      "valid_combos": 180,
+      "production": {
+        "trades": 78,
+        "monthly_pnl_pct": -0.524586295264624,
+        "profit_factor": 0.8635120322991083,
+        "max_dd_pct": -9.576625,
+        "win_rate": 0.358974358974359,
+        "total_pnl": -12389.9,
+        "by_reason": {
+          "TRAILING_STOP": 19,
+          "STOP_LOSS": 40,
+          "TAKE_PROFIT": 8,
+          "TIME_STOP": 11
+        }
+      },
+      "production_rank_by_monthly": 56,
+      "grid_best": {
+        "params": {
+          "target_profit": 0.04,
+          "atr_mult": 2.0,
+          "rsi_upper": 45,
+          "rsi_lower": null,
+          "time_stop": 5,
+          "max_positions": 2,
+          "signal": "ma_cross"
+        },
+        "trades": 77,
+        "monthly_pnl_pct": -0.21547799442896937,
+        "profit_factor": 0.9366703479599932,
+        "max_dd_pct": -11.289125,
+        "win_rate": 0.42857142857142855,
+        "total_pnl": -5089.25,
+        "by_reason": {
+          "TRAILING_STOP": 8,
+          "STOP_LOSS": 39,
+          "TAKE_PROFIT": 19,
+          "TIME_STOP": 11
+        }
+      },
+      "grid_median_monthly_pnl_pct": -0.6392997214484679
+    },
+    "2024": {
+      "elapsed_sec": 27.8,
+      "valid_combos": 180,
+      "production": {
+        "trades": 55,
+        "monthly_pnl_pct": 0.8749263157894738,
+        "profit_factor": 1.3276541730396254,
+        "max_dd_pct": -10.789,
+        "win_rate": 0.38181818181818183,
+        "total_pnl": 20779.5,
+        "by_reason": {
+          "TRAILING_STOP": 10,
+          "TIME_STOP": 6,
+          "STOP_LOSS": 31,
+          "TAKE_PROFIT": 8
+        }
+      },
+      "production_rank_by_monthly": 84,
+      "grid_best": {
+        "params": {
+          "target_profit": 0.06,
+          "atr_mult": 2.0,
+          "rsi_upper": 45,
+          "rsi_lower": null,
+          "time_stop": 3,
+          "max_positions": 2,
+          "signal": "ma_cross"
+        },
+        "trades": 58,
+        "monthly_pnl_pct": 1.6875747368421055,
+        "profit_factor": 1.630211879397775,
+        "max_dd_pct": -8.30725,
+        "win_rate": 0.39655172413793105,
+        "total_pnl": 40079.9,
+        "by_reason": {
+          "TIME_STOP": 15,
+          "STOP_LOSS": 28,
+          "TAKE_PROFIT": 9,
+          "TRAILING_STOP": 6
+        }
+      },
+      "grid_median_monthly_pnl_pct": 0.8343263157894738
+    },
+    "2025": {
+      "elapsed_sec": 32.4,
+      "valid_combos": 180,
+      "production": {
+        "trades": 56,
+        "monthly_pnl_pct": -0.01938212290502793,
+        "profit_factor": 0.9927683741118882,
+        "max_dd_pct": -11.9765,
+        "win_rate": 0.35714285714285715,
+        "total_pnl": -456.5,
+        "by_reason": {
+          "TIME_STOP": 7,
+          "TRAILING_STOP": 22,
+          "TAKE_PROFIT": 4,
+          "STOP_LOSS": 23
+        }
+      },
+      "production_rank_by_monthly": 172,
+      "grid_best": {
+        "params": {
+          "target_profit": 0.05,
+          "atr_mult": 2.5,
+          "rsi_upper": 45,
+          "rsi_lower": null,
+          "time_stop": 5,
+          "max_positions": 2,
+          "signal": "ma_cross"
+        },
+        "trades": 53,
+        "monthly_pnl_pct": 1.6084826815642457,
+        "profit_factor": 1.6334587409079508,
+        "max_dd_pct": -5.30375,
+        "win_rate": 0.49056603773584906,
+        "total_pnl": 37884.0,
+        "by_reason": {
+          "TAKE_PROFIT": 17,
+          "TIME_STOP": 12,
+          "STOP_LOSS": 22,
+          "TRAILING_STOP": 2
+        }
+      },
+      "grid_median_monthly_pnl_pct": 0.39319597765363123
+    }
+  }
+}
