@@ -169,7 +169,7 @@ class SheetsStateRepository:
         if len(rows) < 2 or not rows[1][0]:
             return PortfolioState(
                 state=SystemState.IDLE,
-                cash_jpy=Decimal("200000"),  # Phase 1 default after C adoption
+                cash_jpy=Decimal("600000"),  # 2026-07-05 最終増額後の既定値
             )
         # Pad to header length so dict-zip works even with the new JSON columns absent
         raw = list(rows[1]) + [""] * (len(_PORTFOLIO_HEADER) - len(rows[1]))
@@ -197,7 +197,7 @@ class SheetsStateRepository:
 
         return PortfolioState(
             state=_parse_state_safe(r.get("state", "")),
-            cash_jpy=Decimal(r["cash_jpy"] or "200000"),
+            cash_jpy=Decimal(r["cash_jpy"] or "600000"),
             positions=positions,
             settle_dates=settle_dates,
             last_run_id=r.get("last_run_id", ""),
