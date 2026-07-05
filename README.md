@@ -130,5 +130,8 @@ src/squant/
 scripts/
 ├── backtest.py                  # バックテストエンジン（CLI + in-process API）
 ├── grid_search.py               # パラメータ探索（in-process runner + precompute）
-└── walk_forward.py              # IS/OOS 検証（rolling 3窓、--mode inprocess）
+├── walk_forward.py              # IS/OOS 検証（rolling 3窓、--mode inprocess）
+├── ops_status.py                # 運用状態の読み取り専用ダンプ（portfolio/CB/run_log/pending）
+├── dry_run.py                   # ローカルドライラン（--synthetic でネットワーク不要）
+└── bootstrap_sheet.py           # Sheets 初期化（--apply 必須。無指定はプレビューのみ）
 ```

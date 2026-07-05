@@ -18,9 +18,10 @@ GHA のスケジュール遅延があるため、**実際の完走は 22:00〜24
 
 1. **circuit_breaker**: `is_tripped` が `True` なら最優先事項。即オーナーに Slack 報告
    （新規エントリー停止中。リセットはオーナーが Sheets を手動編集する。勝手にリセットしない）。
-2. **run_log の最終行**: 直近営業日の日付で `status=success` か。
-   - 前営業日の行が無い/failed → Step 2 へ。
-   - success → Step 3 へ。
+2. **run_log の最終行**: **直近の平日（東証営業日）** の日付で `status=success` か。
+   - if 今日が土日・祝日 → 当日の行が無いのは正常（cron は平日のみ）。直近の平日の行を見る。
+   - if 直近平日の行が無い/failed → Step 2 へ。
+   - if success → Step 3 へ。
 3. **portfolio**: `state`（IDLE/保有中）と `cash_jpy`。
 4. **pending_signals**: 未消化シグナルの有無（あればオーナーの発注待ち。約定報告の催促を報告に含める）。
 
@@ -47,6 +48,7 @@ BYPASS_EXECUTION_TIME_GUARD=true BYPASS_TRADING_DAY_CHECK=true \
 ファネル: ユニバース282 → OHLCV有効銘柄 → ファンダ通過（市場: 時価総額→流動性→PBR→自己資本比率→**価格¥100〜3,000**→決算ブラックアウト）→ MAクロス条件 → シグナル。
 
 - 通過数の一次情報は Slack の当日ラン通知（「有効銘柄 X/282」「スクリーニング通過: N銘柄」）。
+  **Slack は送信専用で自分では読めない** → 必要なら「当日の通知本文の転記」を Slack でオーナーに依頼する。
 - フィルタ別の脱落数（`Screener filter counts` ログ行）は GHA ログにのみ出る（gh 未認証のため
   現状はオーナーに Web 確認を依頼）。
 - if スクリーニング通過が 0〜2銘柄 → 価格上限が最有力容疑（2026-06 に上限¥1,000で 203→1 まで
