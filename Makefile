@@ -24,10 +24,10 @@ typecheck:
 	mypy src/squant
 
 dry-run:
-	python -m squant.main --dry-run
+	DRY_RUN=true python -m squant.main
 
 bootstrap-sheet:
-	python scripts/bootstrap_sheet.py
+	python scripts/bootstrap_sheet.py --apply
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null; true
