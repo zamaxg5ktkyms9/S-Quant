@@ -54,7 +54,7 @@ class SyntheticMarketDataClient:
         return True
 
     def fetch_ohlcv(
-        self, tickers: list, start: date, end: date
+        self, tickers: list, start: date, end: date, on_progress=None
     ) -> tuple:
         end_ts = pd.Timestamp(end)
         # Generate 220 business days ending on or before end, then force last = end
@@ -89,7 +89,7 @@ class SyntheticMarketDataClient:
         start_ts = pd.Timestamp(start)
         return adj_close.loc[start_ts:], volume.loc[start_ts:]
 
-    def fetch_fundamentals(self, tickers: list) -> pd.DataFrame:
+    def fetch_fundamentals(self, tickers: list, on_progress=None) -> pd.DataFrame:
         records = [
             {
                 "ticker": t,
