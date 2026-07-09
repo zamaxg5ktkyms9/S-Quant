@@ -1,0 +1,52 @@
+{
+  "note": "2026 H1 真正OOS — 現行構成の選定(戦略/パラメータ/ティア)に一切使われていない期間",
+  "period": "2026-01-05..2026-07-09",
+  "config": "¥600k / pmax3000 / noTP/ATR3.0/TS5 / 2slots",
+  "metrics": {
+    "trades": 32,
+    "signals": 35,
+    "gap_up_skipped": 7,
+    "insufficient_skipped": 0,
+    "trades_per_month": 5.258378378378378,
+    "trades_per_year": 63.178378378378376,
+    "avg_holding_days": 5.625,
+    "total_pnl": 126253.5,
+    "total_return_pct": 21.042250000000003,
+    "monthly_pnl": 20746.52108108108,
+    "monthly_pnl_pct": 3.457753513513514,
+    "cagr_pct": 45.79563198664902,
+    "final_equity": 726253.5,
+    "win_rate": 0.5625,
+    "expectancy": 3945.421875,
+    "expectancy_pct": 1.4517441287606838,
+    "avg_win": 12406.944444444445,
+    "avg_loss": -6933.678571428572,
+    "win_loss_ratio": 1.7893740410132968,
+    "best_trade": 58400.0,
+    "worst_trade": -9680.0,
+    "max_consecutive_wins": 7,
+    "max_consecutive_losses": 3,
+    "max_dd": -33284.0,
+    "max_dd_pct": -5.5473333333333334,
+    "max_dd_duration_trades": 6,
+    "sharpe_ratio": 2.296285914938931,
+    "sortino_ratio": 6.8683297248939255,
+    "calmar_ratio": 8.255431796655873,
+    "profit_factor": 2.3006237670170955,
+    "by_reason": {
+      "TIME_STOP": 15,
+      "TRAILING_STOP": 3,
+      "STOP_LOSS": 14
+    },
+    "params": {
+      "target_profit": null,
+      "atr_mult": null,
+      "rsi_upper": null,
+      "rsi_lower": null,
+      "time_stop": null,
+      "price_max": null,
+      "max_positions": 2,
+      "signal": "ma_cross"
+    }
+  }
+}
