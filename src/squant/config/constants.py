@@ -82,4 +82,9 @@ SHEET_CIRCUIT_BREAKER = "circuit_breaker"
 SHEET_RUN_LOG = "run_log"
 SHEET_PENDING_SIGNALS = "pending_signals"
 SHEET_RECENT_SALES = "recent_sales"
+SHEET_FUNNEL_LOG = "funnel_log"
+
+# --- Universe health (requirements §ユニバース健全性の監視) ---
+FUNNEL_ALERT_WINDOW_DAYS = 20      # スクリーニング通過数の移動平均窓
+FUNNEL_ALERT_MIN_AVG = 3.0         # この平均を下回ったら構造レビューをアラート
 SHEET_SNAPSHOTS = "snapshots"

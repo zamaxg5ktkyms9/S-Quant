@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
+from squant.config.constants import FUNNEL_ALERT_MIN_AVG, FUNNEL_ALERT_WINDOW_DAYS
 from squant.config.settings import Settings
 from squant.domain import ranking, screener, signal_engine
 from squant.domain.exceptions import InsufficientCapitalError
@@ -44,6 +45,35 @@ class IdlePipeline:
         self._settings = settings
         self._universe = universe
         self._blackouts = blackouts
+
+    def _record_funnel(
+        self, run_date: date, *, valid: int, passed: int, candidates: int, signals: int,
+    ) -> None:
+        """日次スクリーニングファネルを funnel_log に記録し、通過数の低下をアラート。
+
+        requirements §ユニバース健全性の監視（20日平均 < 3 で構造レビュー）の実装。
+        テレメトリなので失敗しても運用は止めない（warning ログのみ）。
+        """
+        if self._settings.dry_run:
+            return
+        try:
+            self._repo.append_funnel_log(
+                run_date, universe=len(self._universe), valid_tickers=valid,
+                screener_passed=passed, signal_candidates=candidates,
+                signals_sent=signals,
+            )
+            counts = self._repo.load_recent_screener_counts(FUNNEL_ALERT_WINDOW_DAYS)
+            if len(counts) >= FUNNEL_ALERT_WINDOW_DAYS:
+                avg = sum(counts) / len(counts)
+                if avg < FUNNEL_ALERT_MIN_AVG:
+                    self._notifier.send(
+                        f":warning: [S-Quant] ユニバース健全性アラート: "
+                        f"スクリーニング通過数の{FUNNEL_ALERT_WINDOW_DAYS}日平均が "
+                        f"{avg:.1f}銘柄 < {FUNNEL_ALERT_MIN_AVG:.0f}。"
+                        f"構造レビュー（requirements §ユニバース健全性の監視）が必要です"
+                    )
+        except Exception as e:
+            logger.warning(f"funnel_log recording failed (non-fatal): {e}")
 
     def run(self, portfolio: PortfolioState, run_id: str) -> PortfolioState:
         today = self._clock.today_jst()
@@ -102,6 +132,7 @@ class IdlePipeline:
             logger.info("No valid tickers after data validation — skipping")
             text, blocks = format_no_signal()
             self._notifier.send(text, blocks)
+            self._record_funnel(today, valid=0, passed=0, candidates=0, signals=0)
             return portfolio
 
         self._notifier.send(
@@ -131,10 +162,13 @@ class IdlePipeline:
             f"blackout={fc.get('blackout',0)} "
             f"passed={len(filtered_df)}"
         )
+        screener_passed = len(filtered_df)
         if filtered_df.empty:
             logger.info("No candidates after fundamental screening")
             text, blocks = format_no_signal()
             self._notifier.send(text, blocks)
+            self._record_funnel(today, valid=len(valid_tickers), passed=0,
+                                candidates=0, signals=0)
             return portfolio
 
         self._notifier.send(
@@ -148,6 +182,8 @@ class IdlePipeline:
             logger.info("No candidates after recent-sales/held exclusion")
             text, blocks = format_no_signal()
             self._notifier.send(text, blocks)
+            self._record_funnel(today, valid=len(valid_tickers), passed=screener_passed,
+                                candidates=0, signals=0)
             return portfolio
 
         filtered_tickers = filtered_df["ticker"].tolist()
@@ -164,12 +200,16 @@ class IdlePipeline:
             logger.info("No buy signals detected")
             text, blocks = format_no_signal()
             self._notifier.send(text, blocks)
+            self._record_funnel(today, valid=len(valid_tickers), passed=screener_passed,
+                                candidates=0, signals=0)
             return portfolio
 
         # Multi-position: rank top-N where N = open slots
         open_slots = max(0, self._settings.max_positions - portfolio.in_use_slots)
         if open_slots == 0:
             logger.info("No open slots — skipping signal generation")
+            self._record_funnel(today, valid=len(valid_tickers), passed=screener_passed,
+                                candidates=len(candidates), signals=0)
             return portfolio
         top = ranking.rank(candidates, top_n=open_slots)
         logger.info(f"Top candidates ({len(top)}/{open_slots} slots): "
@@ -222,6 +262,8 @@ class IdlePipeline:
 
         if not new_pendings:
             logger.info("No pending signals generated (all skipped)")
+            self._record_funnel(today, valid=len(valid_tickers), passed=screener_passed,
+                                candidates=len(candidates), signals=0)
             return portfolio
 
         # Single combined Slack notification for all queued signals (no spam)
@@ -234,6 +276,9 @@ class IdlePipeline:
 
         if not self._settings.dry_run:
             self._repo.save_pending_signals(all_pendings)
+
+        self._record_funnel(today, valid=len(valid_tickers), passed=screener_passed,
+                            candidates=len(candidates), signals=len(new_pendings))
 
         from squant.domain.enums import SystemState
 

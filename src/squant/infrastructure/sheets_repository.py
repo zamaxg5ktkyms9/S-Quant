@@ -7,6 +7,7 @@ from typing import Any
 
 from squant.config.constants import (
     SHEET_CIRCUIT_BREAKER,
+    SHEET_FUNNEL_LOG,
     SHEET_PENDING_SIGNALS,
     SHEET_PORTFOLIO,
     SHEET_RECENT_SALES,
@@ -375,6 +376,39 @@ class SheetsStateRepository:
                 self._c.update_row(SHEET_PENDING_SIGNALS, idx, r)
                 if ticker is not None:
                     return
+
+    # ── Funnel log（ユニバース健全性の監視・改善提案 A2）────────────────────────
+
+    _FUNNEL_HEADER = [
+        "run_date", "universe", "valid_tickers", "screener_passed",
+        "signal_candidates", "signals_sent",
+    ]
+
+    def append_funnel_log(
+        self, run_date: date, universe: int, valid_tickers: int,
+        screener_passed: int, signal_candidates: int, signals_sent: int,
+    ) -> None:
+        """日次スクリーニングファネルを funnel_log タブに追記する。"""
+        ws = self._c.get_or_create_sheet(SHEET_FUNNEL_LOG)
+        rows = self._c.read_all(SHEET_FUNNEL_LOG)
+        if not rows:
+            ws.append_row(self._FUNNEL_HEADER)
+        self._c.append_row(SHEET_FUNNEL_LOG, [
+            run_date.strftime(_DATE_FMT), str(universe), str(valid_tickers),
+            str(screener_passed), str(signal_candidates), str(signals_sent),
+        ])
+
+    def load_recent_screener_counts(self, n: int = 20) -> list[int]:
+        """直近 n 営業日分のスクリーニング通過数（新しい順ではなく記録順）。"""
+        rows = self._c.read_all(SHEET_FUNNEL_LOG)
+        if len(rows) < 2:
+            return []
+        col = self._FUNNEL_HEADER.index("screener_passed")
+        counts: list[int] = []
+        for r in rows[1:]:
+            if len(r) > col and r[col].strip().isdigit():
+                counts.append(int(r[col]))
+        return counts[-n:]
 
     # ── Circuit breaker ────────────────────────────────────────────────────────
 

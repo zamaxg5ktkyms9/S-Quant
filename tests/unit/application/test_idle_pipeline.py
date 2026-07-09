@@ -360,3 +360,68 @@ class TestIdlePipelineNotification:
         # The buy summary is the only send carrying Slack blocks (2 pos. args).
         summary_sends = [c for c in notifier.send.call_args_list if len(c.args) >= 2]
         assert len(summary_sends) == 1
+
+
+# ── F. Funnel log（ユニバース健全性の監視・2026-07-09 A2）─────────────────────
+
+class TestFunnelRecording:
+    def test_success_path_records_funnel(self, monkeypatch):
+        """シグナル生成成功時、ファネル数値が funnel_log に記録される。"""
+        pipeline, repo, notifier, _ = _setup(
+            monkeypatch, universe=("A.T", "B.T"), max_positions=2,
+        )
+        repo.load_recent_screener_counts.return_value = []  # 20日未満 → アラートなし
+        pipeline.run(_idle_portfolio(), "run1")
+
+        repo.append_funnel_log.assert_called_once()
+        kwargs = repo.append_funnel_log.call_args.kwargs
+        assert kwargs["universe"] == 2
+        assert kwargs["valid_tickers"] == 2
+        assert kwargs["screener_passed"] == 2
+        assert kwargs["signal_candidates"] == 2
+        assert kwargs["signals_sent"] == 2
+
+    def test_no_candidates_records_zero_signals(self, monkeypatch):
+        pipeline, repo, notifier, _ = _setup(monkeypatch, candidates=[])
+        repo.load_recent_screener_counts.return_value = []
+        pipeline.run(_idle_portfolio(), "run1")
+
+        kwargs = repo.append_funnel_log.call_args.kwargs
+        assert kwargs["signal_candidates"] == 0
+        assert kwargs["signals_sent"] == 0
+
+    def test_low_20day_average_triggers_alert(self, monkeypatch):
+        """通過数の20日平均 < 3 で健全性アラートが送られる。"""
+        pipeline, repo, notifier, _ = _setup(monkeypatch)
+        repo.load_recent_screener_counts.return_value = [1] * 20
+        pipeline.run(_idle_portfolio(), "run1")
+
+        alert_sends = [
+            c for c in notifier.send.call_args_list
+            if c.args and "ユニバース健全性アラート" in str(c.args[0])
+        ]
+        assert len(alert_sends) == 1
+
+    def test_healthy_average_no_alert(self, monkeypatch):
+        pipeline, repo, notifier, _ = _setup(monkeypatch)
+        repo.load_recent_screener_counts.return_value = [5] * 20
+        pipeline.run(_idle_portfolio(), "run1")
+
+        alert_sends = [
+            c for c in notifier.send.call_args_list
+            if c.args and "ユニバース健全性アラート" in str(c.args[0])
+        ]
+        assert len(alert_sends) == 0
+
+    def test_dry_run_skips_funnel_recording(self, monkeypatch):
+        monkeypatch.setenv("DRY_RUN", "true")
+        pipeline, repo, notifier, _ = _setup(monkeypatch)
+        pipeline.run(_idle_portfolio(), "run1")
+        repo.append_funnel_log.assert_not_called()
+
+    def test_funnel_failure_does_not_break_run(self, monkeypatch):
+        """funnel_log 書き込み失敗はテレメトリ扱い — ランは正常終了する。"""
+        pipeline, repo, notifier, _ = _setup(monkeypatch)
+        repo.append_funnel_log.side_effect = RuntimeError("sheets down")
+        result = pipeline.run(_idle_portfolio(), "run1")
+        assert result.state == SystemState.SIGNAL_SENT
