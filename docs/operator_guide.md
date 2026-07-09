@@ -1,24 +1,24 @@
 # Operator Guide — S-Quant Phase 1
 
-> ✅ **2026-05-29 ステータス: Phase 1 paper trading 準備フェーズ（C 戦略採用）**
-> C-WF 三窓検証で 2/3 窓 Robust ✅、`walk_forward.py` 判定で **✅ Robust verdict** 確定。
-> 戦略は **5×25日 MA クロス（C 戦略）+ 2銘柄分散 + Phase 1 ¥200,000** に確定。
-> 本ガイドはこの戦略に基づく運用手順を記述する。実コード（daily_runner / pipelines / sheets / slack）は **B 実装フェーズで複数 Position 対応に改修中**。改修完了後に paper trading 開始予定。
-> 詳細: [docs/backtest_report.md Section 8.10](backtest_report.md)
+> ✅ **2026-07-05 ステータス: 小額実運用中（¥600,000・noTP 構成）**
+> 戦略は **5×25日 MA クロス（C 戦略）+ 2銘柄分散 + ¥600,000（最終増額・以後固定）** で運用中（2026-06-04〜）。
+> 出口は **noTP/ATR×3.0/TS5日**（利確廃止・損切り逆指値1本、2026-07-05 改定）。
+> GitHub Actions cron 20:30 JST で毎営業日自動実行。
+> 詳細: [docs/backtest_report.md §8.14](backtest_report.md)
 
 ---
 
 > **対象**: S-Quant の半自動運用を担当するオペレーター（=あなた）
 > **想定環境**: SBI証券（単元株・100株単位）+ Slack + GitHub Actions
 > **戦略**: 5×25日 MA クロス + 25日MA 上向きフィルタ + 出来高サージ確認（[docs/backtest_report.md §8.10](backtest_report.md) 参照）
-> **投資資本**: ¥200,000 (Phase 1)、**同時最大 2銘柄保有**、各銘柄 約¥100,000 を上限に動的配分
+> **投資資本**: ¥600,000（最終増額済み・固定）、**同時最大 2銘柄保有**、各銘柄 約¥300,000 を上限に動的配分
 
 ---
 
 ## 0. 全体フロー（1日のリズム）
 
 ```
-20:15 JST  GitHub Actions が自動シグナル生成 → Slack通知
+20:30 JST  GitHub Actions が自動シグナル生成 → Slack通知（GHA 遅延で 22〜24時になることも多い）
             └─→ "SIGNAL" 通知が来たら、当日夜のうちに翌朝の発注準備
                シグナルは **空きスロット数まで複数銘柄**（最大 2件）届くことがある
 
@@ -53,7 +53,7 @@
 🟢 [S-Quant] SIGNAL (yyyy-mm-dd 引け後)  シグナル数: 2/2 銘柄
   ───────────────────────────────────────
   #1  2354.T (Y's Holdings)
-      想定エントリー価格: ¥672  (前日終値、参考: 1銘柄予算 ¥100,000)
+      想定エントリー価格: ¥672  (前日終値、参考: 1銘柄予算 ¥300,000)
       推奨株数: 100株
       推奨ストップ価格: ¥655   (-2.5%)
       （利確価格なし — TP 廃止、2026-07-05）
@@ -102,7 +102,7 @@
 
 ```
 🔴 [S-Quant] CIRCUIT BREAKER TRIPPED
-  累積実現損失: ¥-30,100 ≥ ¥30,000 (投資資本 ¥200,000 × 15% / ¥30,000)
+  累積実現損失: ¥-90,100 ≥ ¥90,000 (投資資本 ¥600,000 × 15% / ¥90,000)
   全取引を停止しました。手動リセットが必要です。
 
   保有中のポジション (新規エントリーのみ停止、既存は引き続き出口判定):
@@ -213,14 +213,14 @@ Slack の SIGNAL 通知スレッドに以下のフォーマットで返信:
 
 ### 3.3 GitHub Actions が動かない
 
-- 20:15 JST に Slack 通知が来ない場合
+- 20:30 JST に Slack 通知が来ない場合（GHA 遅延で 22〜24時になることも多い）
 - GitHub リポジトリ → Actions タブ → 実行ログを確認
 - よくある原因: J-Quants 認証エラー（APIキー更新が必要）、レートリミット
 - 復旧後、当日のシグナル通知は手動で `python scripts/daily_runner.py` を叩いて再生成可
 
 ### 3.4 サーキットブレーカー発動
 
-- 累積実現損失が ¥30,000 を超えると自動停止
+- 累積実現損失が ¥90,000 を超えると自動停止
 - 原因分析:
   - 連敗が続いた → 戦略の見直し（market regime change か、ロジック劣化か）
   - 想定外の大損1件 → エントリー条件の追加検討
@@ -245,17 +245,17 @@ Slack の SIGNAL 通知スレッドに以下のフォーマットで返信:
 
 ### 4.2 コード・データ
 
-- [ ] `data/universe.csv` が最新（株価帯 ¥100〜¥1,000、282銘柄程度）
+- [ ] `data/universe.csv` が最新（スクリーニング価格帯 ¥100〜¥3,000、282銘柄程度）
 - [ ] `data/earnings_calendar.csv` が向こう3ヶ月分カバー
 - [ ] `pytest tests/unit` が全PASS（**184件**: 既存170 + screener 6 + signal_engine MA クロス 8）
 - [ ] **C 戦略の application 層実装が完了**（`PortfolioState.positions: list[Position]`、daily_runner / pipelines / sheets / slack が複数銘柄対応）
 - [ ] **GitHub Actions の `daily.yml` が `--signal ma_cross` または settings で C 戦略を有効化済み**
-- [ ] `python scripts/dry_run.py --date {当日} --signal ma_cross --max-positions 2 --budget 200000` がエラーなく完走
+- [ ] `python scripts/dry_run.py --date {当日} --signal ma_cross --max-positions 2 --budget 600000` がエラーなく完走
 - [ ] 直近のバックテスト（[docs/backtest_report.md §8.10](backtest_report.md)）の数値を理解している（OOS PF 1.21〜1.36、monthly +0.54〜+0.84%）
 
 ### 4.3 GitHub Actions
 
-- [ ] `.github/workflows/daily.yml` の cron が `20:15 JST` (= `15 11 * * 1-5` UTC) になっている
+- [ ] `.github/workflows/daily_run.yml` の cron が `20:30 JST` (= `30 11 * * 1-5` UTC) になっている
 - [ ] 直近の Actions 実行が成功している（dry_run=true で1回テスト）
 - [ ] エラー時 Slack 通知が来る設定になっている
 
@@ -265,7 +265,7 @@ Slack の SIGNAL 通知スレッドに以下のフォーマットで返信:
 - [ ] 国内株式現物の取引ができる状態（信用取引・先物等は不要）
 - [ ] 「ゼロ革命」適用条件を満たしている（各種報告書を電子交付）
 - [ ] 逆指値注文機能が使えることを確認（必要なら一度テスト発注 → 即キャンセル）
-- [ ] **入金残高が ¥200,000 以上**（Phase 1 予算、2銘柄分散用）
+- [ ] **入金残高が ¥600,000 以上**（2銘柄分散用）
 
 ### 4.5 オペレーター運用準備
 

@@ -47,7 +47,7 @@ cp .env.example .env  # APIキーを設定
 | `TIME_STOP_DAYS` | タイムストップ日数 | `5` |
 | `CIRCUIT_BREAKER_LOSS_JPY` | サーキットブレーカー発動損失額 | `90000` |
 | `JQUANTS_RPM` | J-Quants APIレート上限（req/min） | `50` |
-| `DRY_RUN` | 書き込みなし・通知なしのテストモード | `false` |
+| `DRY_RUN` | 書き込みなしのテストモード（Slack 通知は `[DRY RUN]` プレフィックス付きで送信される） | `false` |
 
 ## 実行
 
