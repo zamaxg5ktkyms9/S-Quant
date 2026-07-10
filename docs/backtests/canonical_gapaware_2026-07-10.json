@@ -1,0 +1,76 @@
+{
+  "note": "F-2 修正後（ギャップ約定現実化＋入口ギャップダウン見送り）の正準数字",
+  "config": "¥600k / pmax3000 / noTP/ATR3.0/TS5 / 2slots",
+  "periods": {
+    "2022": {
+      "trades": 102,
+      "monthly_pnl_pct": -0.3081131481481481,
+      "profit_factor": 0.9497909797034441,
+      "max_dd_pct": -18.214666666666666,
+      "win_rate": 0.4019607843137255,
+      "sharpe_ratio": 0.2014658874198101,
+      "gap_down_skipped": 5,
+      "by_reason": {
+        "STOP_LOSS": 51,
+        "TIME_STOP": 50,
+        "TRAILING_STOP": 1
+      }
+    },
+    "2023": {
+      "trades": 88,
+      "monthly_pnl_pct": -0.7631260909935004,
+      "profit_factor": 0.8162280381264413,
+      "max_dd_pct": -12.173125,
+      "win_rate": 0.3977272727272727,
+      "sharpe_ratio": -0.11653400966107391,
+      "gap_down_skipped": 1,
+      "by_reason": {
+        "TIME_STOP": 56,
+        "STOP_LOSS": 30,
+        "TRAILING_STOP": 2
+      }
+    },
+    "2024": {
+      "trades": 88,
+      "monthly_pnl_pct": 1.580077192982456,
+      "profit_factor": 1.3274978582410086,
+      "max_dd_pct": -9.736458333333333,
+      "win_rate": 0.4318181818181818,
+      "sharpe_ratio": 1.0561106550464001,
+      "gap_down_skipped": 6,
+      "by_reason": {
+        "STOP_LOSS": 40,
+        "TIME_STOP": 46,
+        "TRAILING_STOP": 2
+      }
+    },
+    "2025": {
+      "trades": 94,
+      "monthly_pnl_pct": 0.8815504655493481,
+      "profit_factor": 1.1875981646319702,
+      "max_dd_pct": -13.705833333333334,
+      "win_rate": 0.48936170212765956,
+      "sharpe_ratio": 0.9995918968670329,
+      "gap_down_skipped": 2,
+      "by_reason": {
+        "STOP_LOSS": 35,
+        "TIME_STOP": 59
+      }
+    },
+    "2026H1": {
+      "trades": 33,
+      "monthly_pnl_pct": 2.2457726126126123,
+      "profit_factor": 1.7153487641733494,
+      "max_dd_pct": -7.545791666666666,
+      "win_rate": 0.5151515151515151,
+      "sharpe_ratio": 1.5770890130514268,
+      "gap_down_skipped": 3,
+      "by_reason": {
+        "TIME_STOP": 15,
+        "TRAILING_STOP": 3,
+        "STOP_LOSS": 15
+      }
+    }
+  },
+  "avg_monthly_pct_4y": 0.348
+}

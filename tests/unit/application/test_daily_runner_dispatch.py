@@ -317,3 +317,49 @@ class TestMultiPendingConfirmation:
         assert {p.ticker for p in result.positions} == {"B.T"}
         # Cancelled signal is dropped (not kept as pending)
         assert result.pending_signals == ()
+
+
+# ── Circuit breaker gate（2026-07-10 F-1 対応）────────────────────────────────
+
+def _tripped_status() -> CircuitBreakerStatus:
+    return CircuitBreakerStatus(
+        is_tripped=True, cumulative_loss_jpy=Decimal("95000"), tripped_at=NOW,
+    )
+
+
+class TestCircuitBreakerGate:
+    def test_tripped_holding_continues_exit_management(self):
+        """発動中でも HOLDING は dispatch され、出口管理が継続する（F-1 修正の核心）"""
+        runner, state_repo = _make_runner(portfolio_state=SystemState.HOLDING)
+        state_repo.load_circuit_breaker.return_value = _tripped_status()
+        runner._holding.run.return_value = PortfolioState(
+            state=SystemState.HOLDING, cash_jpy=Decimal("100000"),
+        )
+        result = runner.run()
+        runner._holding.run.assert_called_once()
+        assert result.success is True
+        assert result.note != "circuit_breaker_tripped"
+
+    def test_tripped_idle_halts_new_entries(self):
+        """発動中の IDLE は新規シグナル生成をしない"""
+        runner, state_repo = _make_runner(portfolio_state=SystemState.IDLE)
+        state_repo.load_circuit_breaker.return_value = _tripped_status()
+        result = runner.run()
+        runner._idle.run.assert_not_called()
+        assert result.note == "circuit_breaker_tripped"
+
+    def test_tripped_signal_sent_cancels_pendings(self):
+        """発動中に未消化 pending が残っていたらキャンセルして発注を防ぐ"""
+        pending = _make_pending(ExecutionStatus.PENDING)
+        runner, state_repo = _make_runner(
+            portfolio_state=SystemState.SIGNAL_SENT, pending=pending,
+        )
+        state_repo.load_portfolio.return_value = PortfolioState(
+            state=SystemState.SIGNAL_SENT, cash_jpy=Decimal("100000"),
+            pending_signals=(pending,),
+        )
+        state_repo.load_circuit_breaker.return_value = _tripped_status()
+        result = runner.run()
+        state_repo.cancel_pending_signal.assert_called_once_with(None)
+        runner._idle.run.assert_not_called()
+        assert result.note == "circuit_breaker_tripped"

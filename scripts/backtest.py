@@ -87,6 +87,7 @@ class BacktestState:
     trades: list[TradeRecord] = field(default_factory=list)
     signals_found: int = 0
     gap_up_skipped: int = 0
+    gap_down_skipped: int = 0
     insufficient_capital_skipped: int = 0
     pending_entries: list[PendingEntry] = field(default_factory=list)  # 翌営業日に順次約定判定
 
@@ -185,6 +186,14 @@ def _process_pending_entry(
         print(f"  SKIP  {pe.ticker} @ ¥{today_open}: gap-up +{gap_pct:.1f}% > 2%", flush=True)
         return
 
+    # ギャップダウン判定（design.md 発注フロー step 2: 始値が推奨ストップ圏内なら
+    # その銘柄のエントリーを見送る運用ルール。F-2 対応で backtest にも反映）
+    stop_ref = compute_stop_loss_price(pe.reference_close, settings.stop_loss_rate)
+    if today_open <= stop_ref:
+        state.gap_down_skipped += 1
+        print(f"  SKIP  {pe.ticker} @ ¥{today_open}: gap-down ≤ 推奨ストップ ¥{stop_ref}", flush=True)
+        return
+
     # 動的予算: 残キャッシュ / 残空きスロット数
     open_slots = state.open_slots
     if open_slots <= 0:
@@ -239,7 +248,7 @@ def _process_exit(
     if ohlc is None:
         return pos
 
-    _today_open, today_high, today_low, today_close = ohlc
+    today_open, today_high, today_low, today_close = ohlc
 
     close_col = "AdjC" if "AdjC" in cache_df.columns else "C"
     high_col  = "AdjH" if "AdjH" in cache_df.columns else "H"
@@ -261,6 +270,16 @@ def _process_exit(
 
     if exit_dec.should_exit:
         exit_price = exit_dec.exit_price if exit_dec.exit_price is not None else today_close
+        # F-2 (2026-07-10 独立レビュー対応): ギャップ約定の現実化。
+        # 逆指値（ハード/トレーリング）は寄付がトリガー価格を割っていた場合、
+        # ストップ価格ではなく寄付価格で成行約定する（旧モデルはストップ価格
+        # ちょうどの約定を仮定し、ギャップダウン損失を系統的に過小評価していた）。
+        # 利確指値も対称に、寄付がTPを上回っていれば寄付で約定（有利方向）。
+        reason_val = exit_dec.reason.value if exit_dec.reason else "unknown"
+        if (reason_val in ("STOP_LOSS", "TRAILING_STOP") and today_open < exit_price) or (
+            reason_val == "TAKE_PROFIT" and today_open > exit_price
+        ):
+            exit_price = today_open
         pnl = (exit_price - pos.entry_price) * pos.shares
         pnl_pct = float((exit_price / pos.entry_price - 1) * 100)
         holding_days = (today - pos.entry_date).days
@@ -673,6 +692,7 @@ def _state_to_metrics(state: BacktestState, start: date, end: date) -> dict:
         "trades": n_trades,
         "signals": state.signals_found,
         "gap_up_skipped": state.gap_up_skipped,
+        "gap_down_skipped": state.gap_down_skipped,
         "insufficient_skipped": state.insufficient_capital_skipped,
         "trades_per_month": n_trades / months,
         "trades_per_year": trades_per_year,

@@ -159,17 +159,29 @@ def format_settling(ticker: str, settle_date: str) -> tuple[str, list[dict]]:
     return text, blocks
 
 
-def format_circuit_breaker() -> tuple[str, list[dict]]:
-    text = "[S-Quant] サーキットブレーカー発動 — 全取引停止"
-    blocks = [
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": ":rotating_light: *サーキットブレーカー発動*\n累積損失が¥30,000に達したため、全取引を停止しました。\n再開するには Sheets の `circuit_breaker` タブで `is_tripped = False` に変更してください。",
-            },
-        }
-    ]
+def format_circuit_breaker(exit_management_active: bool = False) -> tuple[str, list[dict]]:
+    from squant.config.constants import CIRCUIT_BREAKER_LOSS_JPY
+
+    threshold = f"¥{int(CIRCUIT_BREAKER_LOSS_JPY):,}"
+    if exit_management_active:
+        text = "[S-Quant] サーキットブレーカー発動中 — 新規エントリー停止（出口管理は継続）"
+        body = (
+            f":rotating_light: *サーキットブレーカー発動中*\n"
+            f"純累積損失が {threshold} に達したため、新規エントリーを停止しています。\n"
+            f"保有ポジションの出口管理（トレーリング更新・タイムストップ）は継続します。\n"
+            f"再開するには Sheets の `circuit_breaker` タブで `is_tripped = False` に変更してください"
+            f"（リセット前に Walk-Forward 再検証が必要です — requirements 参照）。"
+        )
+    else:
+        text = "[S-Quant] サーキットブレーカー発動 — 新規エントリー停止"
+        body = (
+            f":rotating_light: *サーキットブレーカー発動*\n"
+            f"純累積損失が {threshold} に達したため、新規エントリーを停止しました"
+            f"（未消化の発注待ちシグナルはキャンセルされます）。\n"
+            f"再開するには Sheets の `circuit_breaker` タブで `is_tripped = False` に変更してください"
+            f"（リセット前に Walk-Forward 再検証が必要です — requirements 参照）。"
+        )
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": body}}]
     return text, blocks
 
 

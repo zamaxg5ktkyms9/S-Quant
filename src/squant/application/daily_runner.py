@@ -123,20 +123,40 @@ class DailyRunner:
             # Reconcile state (time-driven, safe even after missed runs)
             portfolio = self._reconcile(portfolio, today, run_id)
 
-            # Circuit breaker check
+            # Circuit breaker check — 新規エントリーのみ停止し、保有ポジションの
+            # 出口管理（HOLDING/SETTLING）は継続する（設計どおり。2026-07-10
+            # 独立レビュー F-1 対応: 旧実装は dispatch 前に return しており、
+            # 発動中はトレーリング更新・タイムストップ通知まで止まっていた）。
             cb_status = self._repo.load_circuit_breaker()
             if cb_module.is_tripped(cb_status):
-                logger.warning("Circuit breaker tripped — halting all operations")
-                text, blocks = format_circuit_breaker()
-                self._notifier.send(text, blocks)
-                self._repo.mark_run_complete(
-                    RunRecord(run_id=run_id, run_date=today, status="success", note="cb_tripped")
-                )
-                return RunResult(
-                    success=True, run_id=run_id,
-                    state_before=state_before, state_after=portfolio.state,
-                    note="circuit_breaker_tripped",
-                )
+                if portfolio.state in (SystemState.HOLDING, SystemState.SETTLING):
+                    logger.warning(
+                        "Circuit breaker tripped — new entries halted; "
+                        "continuing exit management for held positions"
+                    )
+                    text, blocks = format_circuit_breaker(exit_management_active=True)
+                    self._notifier.send(text, blocks)
+                    # fall through to dispatch（出口評価は実行される）
+                else:
+                    # IDLE / SIGNAL_SENT: 新規シグナル生成・約定確認を停止。
+                    # 未消化 pending が残っていればキャンセルして発注を防ぐ。
+                    if portfolio.pending_signals and not self._settings.dry_run:
+                        self._repo.cancel_pending_signal(None)
+                        logger.warning(
+                            "Circuit breaker tripped — cancelled "
+                            f"{len(portfolio.pending_signals)} pending signal(s)"
+                        )
+                    logger.warning("Circuit breaker tripped — halting new entries")
+                    text, blocks = format_circuit_breaker()
+                    self._notifier.send(text, blocks)
+                    self._repo.mark_run_complete(
+                        RunRecord(run_id=run_id, run_date=today, status="success", note="cb_tripped")
+                    )
+                    return RunResult(
+                        success=True, run_id=run_id,
+                        state_before=state_before, state_after=portfolio.state,
+                        note="circuit_breaker_tripped",
+                    )
 
             # Dispatch to state-appropriate pipeline
             logger.info(f"State: {portfolio.state.value} | run_id={run_id}")
