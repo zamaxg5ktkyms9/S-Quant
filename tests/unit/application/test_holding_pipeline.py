@@ -327,3 +327,32 @@ class TestHoldingPipelineMultiPosition:
             state_repo.save_portfolio.assert_not_called()
         finally:
             os.environ.pop("DRY_RUN", None)
+
+
+# ── Fetch window regression（2026-07-11: 本番初 HOLDING で発覚したバグ）────────
+
+class TestFetchWindowCoversValidatorRequirement:
+    def test_fetch_start_covers_history_days_required(self):
+        """取得窓が validator の HISTORY_DAYS_REQUIRED(90日) を必ずカバーする。
+
+        旧実装は 30日窓で、保有中は毎晩「insufficient history: 23 < 90」→
+        出口評価スキップ（トレーリング・タイムストップ不動作）になっていた。
+        """
+        from datetime import timedelta
+
+        from squant.config.constants import HISTORY_DAYS_REQUIRED
+
+        pipeline, _, _ = _make_pipeline()
+        portfolio = PortfolioState(
+            state=SystemState.HOLDING,
+            cash_jpy=Decimal("100000"),
+            positions=(_make_position(),),
+        )
+        pipeline.run(portfolio, "run1")
+
+        args = pipeline._data.fetch_ohlcv_full.call_args
+        start = args.args[1] if len(args.args) > 1 else args.kwargs["start"]
+        assert start <= TODAY - timedelta(days=HISTORY_DAYS_REQUIRED), (
+            f"fetch window too short: start={start} must be >= "
+            f"{HISTORY_DAYS_REQUIRED} calendar days before {TODAY}"
+        )

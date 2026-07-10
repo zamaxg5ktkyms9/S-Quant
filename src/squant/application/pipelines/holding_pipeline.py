@@ -110,8 +110,13 @@ class HoldingPipeline:
         today = self._clock.today_jst()
         position = portfolio.positions[0]
 
-        # Fetch recent OHLCV for the held ticker
-        start = today - timedelta(days=30)
+        # Fetch OHLCV for the held ticker.
+        # 160 calendar days ≈ 115 trading days — idle_pipeline と同じ窓。
+        # 旧値 30日 (≈23営業日) は validator の HISTORY_DAYS_REQUIRED=90 を
+        # 常に下回り、本番初 HOLDING (2026-07-10 2201.T) で「データ品質警告 →
+        # 出口評価スキップ」が毎晩発生していた（トレーリング更新・タイムストップ
+        # 判定が不動作）。ATR(14) 計算にも 90日超の窓で品質が安定する。
+        start = today - timedelta(days=160)
         raw = self._data.fetch_ohlcv_full([position.ticker], start, today)
 
         if raw.empty:
