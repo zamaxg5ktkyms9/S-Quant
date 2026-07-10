@@ -176,6 +176,21 @@ Slack の SIGNAL 通知スレッドに以下のフォーマットで返信:
 見送り銘柄も明示することで、システム側が「pending_signal を消化して空きスロットを復元」する判断を正しく行える。
 → システム（手動運用の場合は次回 GitHub Actions 実行時）が Sheets に保存する。
 
+**報告忘れの安全網（A-5, 2026-07-11）**:
+- 15:30 JST に未報告の pending が残っていると Slack に催促が届く（GHA: Pending Fill Reminder）。
+- **20:30 のランまでに未記録の場合は「発注なし」として自動キャンセル**される。実際には約定して
+  いた場合は Sheets とポジションがズレるため、必ず催促に応答すること。
+- Slack 返信の代わりに CLI で直接記録もできる:
+
+```bash
+# 約定した場合
+.venv/bin/python scripts/confirm_entry.py --ticker 2354.T --price 674 --shares 100
+# 見送り/不成立の場合
+.venv/bin/python scripts/confirm_entry.py --ticker 3053.T --cancel
+```
+
+記録された約定は当夜のランがポジション化（HOLDING 遷移・損切ライン計算）まで自動処理する。
+
 ### 2.5 STEP 5: トレーリングストップ更新（毎営業日 20:30 以降）
 
 1. Slack "TRAILING UPDATE" 通知を確認
