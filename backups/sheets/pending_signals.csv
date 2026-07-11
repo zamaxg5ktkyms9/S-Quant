@@ -1,0 +1,1 @@
+run_id,ticker,reference_price,shares,cancel_above_price,stop_loss_price,rsi,reason,generated_at,execution_status,actual_entry_price,actual_shares,confirmed_at
