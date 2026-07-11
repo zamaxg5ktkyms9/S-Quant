@@ -32,3 +32,9 @@ jobs:
 
       - name: Check run_log for today's success
         run: python scripts/watchdog.py
+
+      # 会計恒等式チェック（V-2）。初期資本は Settings.budget_jpy の既定値
+      # （daily_run 本体と同じ経路）。watchdog が赤でも独立に実行する。
+      - name: Verify ledger invariants
+        if: always()
+        run: python scripts/verify_ledger.py
