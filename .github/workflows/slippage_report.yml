@@ -1,15 +1,14 @@
-name: Pending Fill Reminder
+name: Slippage Weekly Report
 
 on:
-  # 15:30 JST = 06:30 UTC（大引け後）。前営業日以前に生成された PENDING が
-  # 残っていれば Slack で約定報告を催促する。20:30 JST の daily_run が古い
-  # PENDING を自動キャンセルするため、その前の記録チャンスを作る（A-5）。
+  # 金曜 21:15 JST = 12:15 UTC。daily_run（20:30 JST）の後、slippage_log の
+  # 直近1週間分を集計して Slack に配信する（A-3）。記録ゼロの週は送信しない。
   schedule:
-    - cron: "30 6 * * 1-5"
+    - cron: "15 12 * * 5"
   workflow_dispatch: {}
 
 jobs:
-  remind:
+  report:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -30,5 +29,5 @@ jobs:
       - name: Install dependencies
         run: pip install -e .
 
-      - name: Remind operator of unconfirmed pending signals
-        run: python scripts/remind_pending.py
+      - name: Send weekly slippage summary
+        run: python scripts/slippage_report.py

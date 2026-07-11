@@ -363,3 +363,55 @@ class TestCircuitBreakerGate:
         state_repo.cancel_pending_signal.assert_called_once_with(None)
         runner._idle.run.assert_not_called()
         assert result.note == "circuit_breaker_tripped"
+
+
+# ── Slippage ledger wiring (2026-07-11 A-3) ───────────────────────────────────
+
+class TestConfirmEntrySlippageLog:
+    def test_filled_with_actual_price_logs_slippage(self):
+        """実約定価格つき FILLED → slippage_log に adverse-positive で記録"""
+        pending = _make_pending(
+            status=ExecutionStatus.FILLED,
+            actual_price=502.0,   # reference 500 → +40bps adverse
+            actual_shares=100,
+        )
+        runner, state_repo = _make_runner(
+            portfolio_state=SystemState.SIGNAL_SENT, pending=pending,
+        )
+        portfolio = PortfolioState(
+            state=SystemState.SIGNAL_SENT, cash_jpy=Decimal("100000")
+        )
+        runner._dispatch(portfolio, "run1")
+        state_repo.append_slippage.assert_called_once()
+        kwargs = state_repo.append_slippage.call_args.kwargs
+        assert kwargs["ticker"] == "1234.T"
+        assert kwargs["side"] == "BUY"
+        assert kwargs["slippage_bps"] == Decimal("40.0")
+        assert kwargs["slippage_jpy"] == Decimal("200")
+
+    def test_filled_without_actual_price_skips_slippage(self):
+        """実約定価格の報告なし（参考価格でデフォルト）→ 無意味なゼロを記録しない"""
+        pending = _make_pending(status=ExecutionStatus.FILLED)
+        runner, state_repo = _make_runner(
+            portfolio_state=SystemState.SIGNAL_SENT, pending=pending,
+        )
+        portfolio = PortfolioState(
+            state=SystemState.SIGNAL_SENT, cash_jpy=Decimal("100000")
+        )
+        runner._dispatch(portfolio, "run1")
+        state_repo.append_slippage.assert_not_called()
+
+    def test_slippage_failure_does_not_break_entry(self):
+        """台帳書込の失敗はエントリー確定を壊さない（non-fatal）"""
+        pending = _make_pending(
+            status=ExecutionStatus.FILLED, actual_price=502.0, actual_shares=100,
+        )
+        runner, state_repo = _make_runner(
+            portfolio_state=SystemState.SIGNAL_SENT, pending=pending,
+        )
+        state_repo.append_slippage.side_effect = RuntimeError("sheets down")
+        portfolio = PortfolioState(
+            state=SystemState.SIGNAL_SENT, cash_jpy=Decimal("100000")
+        )
+        result = runner._dispatch(portfolio, "run1")
+        assert result.state == SystemState.HOLDING

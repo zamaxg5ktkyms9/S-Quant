@@ -389,6 +389,25 @@ class DailyRunner:
 
         if not self._settings.dry_run:
             self._repo.save_portfolio(new_portfolio)
+            # Slippage ledger (A-3): intended (prev-close reference) vs operator-
+            # reported fill. Only when an actual price was reported — a defaulted
+            # price would record a meaningless zero. Never let ledger I/O break
+            # the entry itself.
+            if pending.actual_entry_price is not None:
+                try:
+                    from squant.domain.enums import OrderSide
+                    from squant.domain.slippage import compute_slippage
+                    bps, jpy = compute_slippage(
+                        OrderSide.BUY, sig.reference_price, actual_price, actual_shares
+                    )
+                    self._repo.append_slippage(
+                        log_date=today, ticker=sig.ticker, side=OrderSide.BUY.value,
+                        intended_price=sig.reference_price, actual_price=actual_price,
+                        shares=actual_shares, slippage_bps=bps, slippage_jpy=jpy,
+                        run_id=run_id,
+                    )
+                except Exception as e:
+                    logger.error(f"Slippage log failed (non-fatal): {e}")
 
         logger.info(f"Entry confirmed: {sig.ticker} ×{actual_shares} @ ¥{actual_price}")
         self._notifier.send(

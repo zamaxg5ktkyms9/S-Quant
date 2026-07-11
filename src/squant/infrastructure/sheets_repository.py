@@ -12,6 +12,7 @@ from squant.config.constants import (
     SHEET_PORTFOLIO,
     SHEET_RECENT_SALES,
     SHEET_RUN_LOG,
+    SHEET_SLIPPAGE_LOG,
     SHEET_TRADES,
 )
 from squant.domain.enums import ExecutionStatus, SystemState
@@ -409,6 +410,43 @@ class SheetsStateRepository:
             if len(r) > col and r[col].strip().isdigit():
                 counts.append(int(r[col]))
         return counts[-n:]
+
+    # ── Slippage log（想定 vs 実約定・改善提案 A-3）─────────────────────────────
+
+    _SLIPPAGE_HEADER = [
+        "date", "ticker", "side", "intended_price", "actual_price",
+        "shares", "slippage_bps", "slippage_jpy", "run_id", "note",
+    ]
+
+    def append_slippage(
+        self, *, log_date: date, ticker: str, side: str,
+        intended_price: Decimal, actual_price: Decimal, shares: int,
+        slippage_bps: Decimal, slippage_jpy: Decimal,
+        run_id: str = "", note: str = "",
+    ) -> None:
+        """想定価格 vs 実約定の差分を slippage_log タブに追記する（adverse-positive）。"""
+        ws = self._c.get_or_create_sheet(SHEET_SLIPPAGE_LOG)
+        rows = self._c.read_all(SHEET_SLIPPAGE_LOG)
+        if not rows:
+            ws.append_row(self._SLIPPAGE_HEADER)
+        self._c.append_row(SHEET_SLIPPAGE_LOG, [
+            log_date.strftime(_DATE_FMT), ticker, side,
+            str(intended_price), str(actual_price), str(shares),
+            str(slippage_bps), str(slippage_jpy), run_id, note,
+        ])
+
+    def load_slippage_rows(self) -> list[dict[str, str]]:
+        """slippage_log の全行を dict のリストで返す（集計用）。"""
+        rows = self._c.read_all(SHEET_SLIPPAGE_LOG)
+        if len(rows) < 2:
+            return []
+        out = []
+        for raw in rows[1:]:
+            if not raw or not raw[0]:
+                continue
+            padded = list(raw) + [""] * (len(self._SLIPPAGE_HEADER) - len(raw))
+            out.append(dict(zip(self._SLIPPAGE_HEADER, padded)))  # noqa: B905
+        return out
 
     # ── Circuit breaker ────────────────────────────────────────────────────────
 

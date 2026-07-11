@@ -191,6 +191,20 @@ Slack の SIGNAL 通知スレッドに以下のフォーマットで返信:
 
 記録された約定は当夜のランがポジション化（HOLDING 遷移・損切ライン計算）まで自動処理する。
 
+### 2.4b 売却時の実約定報告（A-3, 2026-07-11）
+
+売却（タイムストップ成行・逆指値約定）後、Slack 報告に加えて実約定価格を
+slippage_log に記録する（システムはモデル価格でしか記録していないため、
+実測 vs 正準約定モデルの突き合わせに必須）:
+
+```bash
+.venv/bin/python scripts/confirm_exit.py --ticker 2201.T --price 2650
+```
+
+- 状態・PnL は書き換えない（記録のみ）。Slack で報告すれば Claude が代行実行する。
+- エントリー側は confirm_entry.py の記録から自動で slippage_log に入る。
+- 週次集計は金曜 21:15 JST に自動配信（GHA: Slippage Weekly Report）。
+
 ### 2.5 STEP 5: トレーリングストップ更新（毎営業日 20:30 以降）
 
 1. Slack "TRAILING UPDATE" 通知を確認
