@@ -36,6 +36,18 @@ def get_signal_func(strategy: str):
     return detect_signals  # default: pullback (A1 戦略、後方互換)
 
 
+def with_volume_columns(adj_close: pd.DataFrame, volume: pd.DataFrame) -> pd.DataFrame:
+    """価格と出来高を signal 関数が期待する単一フレーム（列 "<ticker>_vol"）に結合する。
+
+    旧実装の per-column 代入は DataFrame 断片化の PerformanceWarning を毎ラン・
+    毎バックテストで出していた（改善提案 B-2）。reindex は旧代入と同じ
+    「価格側のインデックスに整列」の挙動を保つ。
+    """
+    vol = volume.reindex(adj_close.index)
+    vol.columns = [f"{c}_vol" for c in vol.columns]
+    return pd.concat([adj_close, vol], axis=1)
+
+
 def detect_signals(
     filtered_tickers: list[str],
     ohlcv: pd.DataFrame,

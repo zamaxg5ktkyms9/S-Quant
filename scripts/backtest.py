@@ -361,9 +361,7 @@ def _process_signal_scan(
     if filtered.empty:
         return
 
-    ohlcv_sig = adj_slice.copy()
-    for col in vol_slice.columns:
-        ohlcv_sig[f"{col}_vol"] = vol_slice[col]
+    ohlcv_sig = signal_engine.with_volume_columns(adj_slice, vol_slice)
 
     detector = signal_func if signal_func is not None else signal_engine.detect_signals
     candidates = detector(filtered["ticker"].tolist(), ohlcv_sig, fund, today)
@@ -849,9 +847,7 @@ def precompute_daily_candidates(
             if filtered.empty:
                 result[today] = []
                 continue
-            ohlcv_sig = adj_slice.copy()
-            for col in vol_slice.columns:
-                ohlcv_sig[f"{col}_vol"] = vol_slice[col]
+            ohlcv_sig = signal_engine.with_volume_columns(adj_slice, vol_slice)
             candidates = signal_func(filtered["ticker"].tolist(), ohlcv_sig, fund, today)
             # 全候補をランク順で保存。per-cell では順序を保ったまま絞るだけなので、
             # rank(部分集合) と同値（安定ソート）。

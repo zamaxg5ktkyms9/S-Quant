@@ -190,9 +190,7 @@ class IdlePipeline:
         logger.info(f"Candidates after screening: {len(filtered_tickers)}")
 
         # Signal detection — pluggable strategy (pullback / ma_cross)
-        ohlcv_for_signals = adj_close.copy()
-        for col in volume.columns:
-            ohlcv_for_signals[f"{col}_vol"] = volume[col]
+        ohlcv_for_signals = signal_engine.with_volume_columns(adj_close, volume)
 
         signal_func = signal_engine.get_signal_func(self._settings.signal_strategy)
         candidates = signal_func(filtered_tickers, ohlcv_for_signals, fundamentals, today)
