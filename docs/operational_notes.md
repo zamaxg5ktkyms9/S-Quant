@@ -144,8 +144,65 @@ subprocess を一切起動しないため、**§1〜3 の落とし穴（pickle I
 
 ---
 
+## 9. Mutation testing（テスト品質の定量化・V-3 検証強化パッケージ）
+
+「テストが 341件 PASS」は「テストが通る」ことしか保証しない。資金計算ロジックの
+テストが**実際にバグを検出できるか**を mutation testing で定量化する。対象は
+`src/squant/domain/` の資金系5ファイルに限定（circuit_breaker / position_manager /
+quantity_calculator / signal_engine / slippage）。
+
+**CI には組み込まない**（実行時間が長く、等価変異の判定に人手が要るため）。
+四半期ごと、または domain 層の資金ロジックを変更したときにローカルで手動実行する。
+
+### ローカル実行手順
+
+```bash
+# 依存は dev extras に含まれる（mutmut, hypothesis）
+pip install -e ".[dev]"
+
+# 対象・テスト選択は pyproject.toml の [tool.mutmut] に定義済み。
+# source_paths=src/squant（editable+src レイアウトのため package 全体をコピーする必要がある）、
+# only_mutate で上記5ファイルに限定、テストは tests/unit/domain のみ選択。
+rm -rf mutants                 # 前回の変異ツリーを破棄（クリーン計測）
+TERM=dumb mutmut run           # 全変異を生成しテスト実行（数分）
+
+# 結果の読み方
+mutmut results                 # survived / no-tests の一覧（killed は表示されない）
+mutmut show <mutant_name>      # 個別の変異 diff を表示
+```
+
+`mutmut run` は `mutants/` に一時ツリーを作る（.gitignore 済み・コミット禁止）。
+
+### kill rate の見方と判断基準
+
+- kill rate = killed /（killed + survived）。no-tests は分母から除く。
+- **資金クリティカル4ファイル（signal_engine を除く）を最重要指標とする**。
+  signal_engine は診断カウンタ（`dropped[...] += 1`）とログ f-string の変異が
+  大量に生き残るが、これらは返り値（Candidate リスト）に影響しない**等価変異**で、
+  kill rate を機械的に押し下げるだけ。資金保全の観点では4ファイルを見る。
+- 2026-07-11 V-3 実施時点の基準値（テスト追加後）:
+  circuit_breaker / slippage = 100%、quantity_calculator ≈ 94%、
+  position_manager ≈ 80%。domain 全体（signal_engine 込み）≈ 55%。
+- **資金4ファイルの kill rate がこの基準を下回ったら、テストの穴を疑う**。
+
+### 生き残りを「実害あり/軽微/等価」に分類する
+
+すべての survived を潰す必要はない。3分類して判断する:
+
+1. **実害あり**（資金計算・出口判定・CB 発動が狂う）→ テストを追加して kill する。
+2. **実害軽微**（人間可読な note 文字列、決済枝で捨てられる返り値、本番無効な
+   TP 経路の表示 round 等）→ 記録して残してよい。
+3. **等価変異**（意味的に元コードと同一。例: `qty <= 0` → `qty <= 1` は qty が
+   常に単元100株の倍数ゆえ到達不能／`spread_rate == 0` → `== 1` は spread=0 の
+   本番では同値）→ 残す。テストで殺そうとしない。
+
+判断に迷う変異は「よりリスクの低い方」＝テストを足す側に倒す。
+
+---
+
 ## 改訂履歴
 
 - 2026-05-26: 初版作成（A1 / B-WF 1回目の失敗を受けて）
 - 2026-07-03: §0 追加（in-process + precompute がデフォルト化、§1〜3 は subprocess モード限定に）、§5 更新
 - 2026-07-10: §8 追加（独立レビュー F-3: 採用判断の in-sample 選択バイアス対策）
+- 2026-07-11: §9 追加（V-3 mutation testing のローカル実行手順・kill rate 判断基準・変異3分類）

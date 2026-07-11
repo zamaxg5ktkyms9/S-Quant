@@ -6,9 +6,11 @@ from decimal import Decimal
 import pandas as pd
 import pytest
 
+from squant.config.constants import ATR_PERIOD, ATR_TRAILING_MULTIPLIER, GAP_UP_CANCEL_THRESHOLD
 from squant.domain.enums import ExitReason
+from squant.domain.indicators import atr
 from squant.domain.models import Position
-from squant.domain.position_manager import evaluate_exit
+from squant.domain.position_manager import evaluate_exit, should_cancel_gap_up
 from squant.domain.quantity_calculator import compute_take_profit_price
 
 
@@ -155,6 +157,150 @@ class TestIntradayMode:
             intraday_high=Decimal("510"), intraday_low=Decimal("498"),
         )
         assert not decision.should_exit
+
+
+def make_trailing_position(
+    entry_price: float = 500.0,
+    trailing_stop_price: float = 570.0,
+    highest: float = 575.0,
+    stop_loss_rate: float = 0.025,
+    entry_date: date = date(2026, 5, 11),
+) -> Position:
+    """トレーリングストップが hard stop より上にラチェット済みのポジション。"""
+    ep = Decimal(str(entry_price))
+    return Position(
+        ticker="1234.T",
+        shares=100,
+        entry_price=ep,
+        intended_entry_price=ep,
+        entry_date=entry_date,
+        stop_loss_price=ep * (1 - Decimal(str(stop_loss_rate))),
+        trailing_stop_price=Decimal(str(trailing_stop_price)),
+        highest_price_since_entry=Decimal(str(highest)),
+        time_stop_date=date(2026, 5, 18),
+    )
+
+
+# ── 境界値（<= の等号側）─────────────────────────────────────────────────
+
+class TestStopBoundary:
+    def test_intraday_low_exactly_at_stop_triggers(self):
+        """日中安値がストップ価格に「ちょうど一致」で発動する（<= の等号側）。
+
+        mutation testing (V-3): `intraday_low <= stop` を `<` に変える変異は、
+        ちょうど一致でのテストがないと生き残る。逆指値は指定価格到達で約定する。
+        """
+        pos = make_position(entry_price=500.0)  # stop = 487.5
+        high, low, close = make_ohlcv(base=495.0)
+        decision = evaluate_exit(
+            pos, date(2026, 5, 11), Decimal("495"), high, low, close,
+            intraday_high=Decimal("498"), intraday_low=Decimal("487.5"),  # == stop ちょうど
+        )
+        assert decision.should_exit
+        assert decision.reason == ExitReason.STOP_LOSS
+        assert decision.exit_price == pos.stop_loss_price
+
+    def test_close_exactly_at_stop_triggers(self):
+        """終値モードでも終値がストップに一致で発動する。"""
+        pos = make_position(entry_price=500.0)  # stop = 487.5
+        high, low, close = make_ohlcv(base=487.5)
+        decision = evaluate_exit(pos, date(2026, 5, 11), Decimal("487.5"), high, low, close)
+        assert decision.should_exit
+        assert decision.reason == ExitReason.STOP_LOSS
+
+
+# ── トレーリングストップ「単独」発動（hard stop に触れない）──────────────
+
+class TestTrailingStopOnly:
+    def test_intraday_trailing_stop_fires_at_effective_stop(self):
+        """トレーリングが hard stop より上にある状態で、日中安値がトレーリングに
+        到達したら TRAILING_STOP でトレーリング価格約定（hard stop には触れない）。
+
+        mutation testing (V-3): should_exit=True→False, effective_stop の <= → <,
+        exit_price=effective_stop→None といった変異はこの経路のテストがないと生き残る。
+        """
+        pos = make_trailing_position()  # trailing 570, stop 487.5, highest 575
+        high, low, close = make_ohlcv(base=575.0)  # ATR≈10 → new_stop=575-30=545 < 570
+        decision = evaluate_exit(
+            pos, date(2026, 5, 12), Decimal("572"), high, low, close,
+            intraday_high=Decimal("575"), intraday_low=Decimal("570"),  # == trailing
+        )
+        assert decision.should_exit
+        assert decision.reason == ExitReason.TRAILING_STOP
+        assert decision.exit_price == Decimal("570")
+        assert decision.updated_trailing_stop == Decimal("570")
+
+    def test_close_mode_trailing_stop_fires(self):
+        """終値モードでも終値がトレーリングに到達したら TRAILING_STOP。
+
+        mutation testing (V-3): `not intraday_mode` の反転や should_exit=True→False を塞ぐ。
+        """
+        pos = make_trailing_position()
+        high, low, close = make_ohlcv(base=575.0)
+        decision = evaluate_exit(pos, date(2026, 5, 12), Decimal("570"), high, low, close)
+        assert decision.should_exit
+        assert decision.reason == ExitReason.TRAILING_STOP
+
+
+# ── HOLD 時のトレーリングストップ・ラチェット値 ────────────────────────
+
+class TestTrailingRatchetValue:
+    def test_hold_returns_ratcheted_trailing_stop(self):
+        """HOLD 継続時、返す updated_trailing_stop は独立計算した
+        「直近高値 - 乗数×ATR」（ラチェット）に一致する。
+
+        mutation testing (V-3): HOLD 経路の updated_trailing_stop=None、および
+        _compute_trailing_stop の iloc[-1]→iloc[-2] / round(...,2)→round(...,3) を塞ぐ。
+        None にすると翌日のラチェット値が失われ、ストップ保護が entry 直後水準に後退する。
+        """
+        # 日々レンジが変動する系列を使う。平坦系列だと ATR が整数値になり
+        # iloc[-1]/iloc[-2] や round(,2)/round(,3)/round(,None) の違いが観測できず、
+        # それらの変異が生き残ってしまうため、意図的に非整数 ATR を作る。
+        n = 30
+        idx = pd.bdate_range(end="2026-05-12", periods=n)
+        closes = [500 + i * 2 + (3 if i % 2 else -1) for i in range(n)]
+        close = pd.Series([float(c) for c in closes], index=idx, dtype=float)
+        high = close + pd.Series([2.0 + (i % 3) for i in range(n)], index=idx)
+        low = close - pd.Series([1.0 + (i % 4) for i in range(n)], index=idx)
+        latest_close = Decimal(str(closes[-1]))
+        highest = Decimal(str(max(closes)))
+        pos = make_trailing_position(trailing_stop_price=487.5, highest=float(highest))
+
+        decision = evaluate_exit(pos, date(2026, 5, 12), latest_close, high, low, close)
+        assert not decision.should_exit  # latest_close は effective_stop より十分上
+
+        # 本番と同じ式で期待値を独立算出（iloc[-1] と round(,2) を固定）
+        atr_series = atr(high, low, close, period=ATR_PERIOD)
+        latest_atr = Decimal(str(round(float(atr_series.iloc[-1]), 2)))
+        expected = max(pos.trailing_stop_price, latest_close - ATR_TRAILING_MULTIPLIER * latest_atr)
+        assert decision.updated_trailing_stop is not None
+        assert decision.updated_trailing_stop == expected
+
+
+# ── ギャップアップ発注見送り閾値 ────────────────────────────────────────
+
+class TestShouldCancelGapUp:
+    def test_cancels_when_open_above_threshold(self):
+        # intended 500, threshold 0.02 → 510 超で見送り
+        assert should_cancel_gap_up(Decimal("500"), Decimal("511")) is True
+
+    def test_does_not_cancel_exactly_at_threshold(self):
+        """始値がちょうど閾値価格なら見送らない（> の境界、>= ではない）。"""
+        assert should_cancel_gap_up(Decimal("500"), Decimal("510")) is False
+
+    def test_does_not_cancel_below_threshold(self):
+        """閾値未満では見送らない（*→/ や 1+→1-/2+ の変異を塞ぐ境界）。"""
+        assert should_cancel_gap_up(Decimal("500"), Decimal("505")) is False
+
+    def test_explicit_threshold_value(self):
+        assert should_cancel_gap_up(Decimal("1000"), Decimal("1051"), threshold=Decimal("0.05")) is True
+        assert should_cancel_gap_up(Decimal("1000"), Decimal("1049"), threshold=Decimal("0.05")) is False
+
+    def test_default_threshold_matches_constant(self):
+        """デフォルト閾値が定数 GAP_UP_CANCEL_THRESHOLD と一致することを固定。"""
+        boundary = Decimal("500") * (1 + GAP_UP_CANCEL_THRESHOLD)
+        assert should_cancel_gap_up(Decimal("500"), boundary + Decimal("0.01")) is True
+        assert should_cancel_gap_up(Decimal("500"), boundary) is False
 
 
 class TestExitPriority:

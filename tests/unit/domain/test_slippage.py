@@ -40,5 +40,19 @@ class TestComputeSlippage:
         assert jpy == Decimal("0")
 
     def test_nonpositive_intended_raises(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="intended_price must be positive"):
             compute_slippage(OrderSide.BUY, Decimal("0"), Decimal("100"), 100)
+
+    def test_negative_intended_raises(self):
+        with pytest.raises(ValueError, match="intended_price must be positive"):
+            compute_slippage(OrderSide.BUY, Decimal("-5"), Decimal("100"), 100)
+
+    def test_intended_price_of_one_yen_does_not_raise(self):
+        """intended_price=¥1 は正の値なので例外を投げない（境界 <= 0 の反対側）。
+
+        mutation testing (V-3): ガード条件 `intended_price <= 0` を `<= 1` に変える変異は
+        ¥1 での非例外を確認しないと生き残る。
+        """
+        bps, jpy = compute_slippage(OrderSide.BUY, Decimal("1"), Decimal("1"), 100)
+        assert bps == Decimal("0.0")
+        assert jpy == Decimal("0")

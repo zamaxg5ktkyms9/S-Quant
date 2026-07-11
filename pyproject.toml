@@ -30,6 +30,8 @@ dev = [
     "pandas-stubs>=2.2.0",
     "types-python-dateutil>=2.9.0",
     "freezegun>=1.5.0",
+    "hypothesis>=6.0",
+    "mutmut>=3.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -59,3 +61,16 @@ ignore_missing_imports = true
 [tool.coverage.run]
 source = ["src/squant"]
 omit = ["*/tests/*"]
+
+# Mutation testing (V-3 検証強化パッケージ). CI には組み込まない（実行時間が長いため）。
+# 実行手順は docs/operational_notes.md 末尾を参照。
+[tool.mutmut]
+source_paths = ["src/squant"]
+only_mutate = [
+    "src/squant/domain/circuit_breaker.py",
+    "src/squant/domain/position_manager.py",
+    "src/squant/domain/quantity_calculator.py",
+    "src/squant/domain/signal_engine.py",
+    "src/squant/domain/slippage.py",
+]
+pytest_add_cli_args_test_selection = ["tests/unit/domain"]

@@ -33,3 +33,7 @@ Thumbs.db
 # yfinance cache
 ~/.cache/py-yfinance/
 .backtest_cache/
+
+# mutation testing (mutmut) 一時ツリー・キャッシュ — コミットしない
+mutants/
+.mutmut-cache

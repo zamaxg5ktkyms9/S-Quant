@@ -79,6 +79,27 @@ class TestUpdateAfterTrade:
         assert new.is_tripped is True
         assert new.cumulative_loss_jpy == Decimal("30500")
 
+    def test_trips_exactly_at_threshold_boundary(self):
+        """純損失がちょうど閾値に一致した瞬間に発動する（>= の境界）。
+
+        mutation testing (V-3): `>= threshold` を `> threshold` に変えると、
+        「ちょうど閾値ぴったり」で発動しなくなる。資金保全上、閾値到達で発動する
+        仕様（設計 §サーキットブレーカー）を境界値で固定する。
+        """
+        status = CircuitBreakerStatus(is_tripped=False, cumulative_loss_jpy=Decimal("89000"))
+        trade = make_trade(-1000)  # net = 90000 == threshold ちょうど
+        new = update_after_trade(status, trade, threshold=Decimal("90000"))
+        assert new.cumulative_loss_jpy == Decimal("90000")
+        assert new.is_tripped is True  # `>` だと False になってしまう
+
+    def test_does_not_trip_one_yen_below_threshold(self):
+        """閾値の1円手前では発動しない（境界の反対側）。"""
+        status = CircuitBreakerStatus(is_tripped=False, cumulative_loss_jpy=Decimal("88999"))
+        trade = make_trade(-1000)  # net = 89999 < 90000
+        new = update_after_trade(status, trade, threshold=Decimal("90000"))
+        assert new.cumulative_loss_jpy == Decimal("89999")
+        assert new.is_tripped is False
+
     def test_trip_is_sticky_until_manual_reset(self):
         """発動後に勝って純損失が閾値を下回っても自動解除しない（手動リセットのみ）"""
         status = CircuitBreakerStatus(

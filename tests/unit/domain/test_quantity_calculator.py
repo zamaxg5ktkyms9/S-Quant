@@ -96,7 +96,7 @@ class TestComputeQuantity:
 
     def test_raises_on_insufficient_capital_for_one_unit(self):
         # ¥900の銘柄を100株 = ¥90,000 が必要。予算¥5,000では1単元買えない
-        with pytest.raises(InsufficientCapitalError):
+        with pytest.raises(InsufficientCapitalError, match="Insufficient capital"):
             compute_quantity(
                 available_cash=Decimal("5000"),
                 prev_close=Decimal("900"),
@@ -148,6 +148,18 @@ class TestComputeTakeProfitPrice:
         tp_with_spread = compute_take_profit_price(entry, Decimal("0.05"), spread_rate=Decimal("0.005"))
         assert tp_with_spread > tp_no_spread
 
+    def test_explicit_spread_exact_value(self):
+        """spread≠0 の TP 公式を厳密値で固定（grid search バックテスト経路）。
+
+        mutation testing (V-3): spread 経路 entry*(1+spread)*(1+target)/(1-spread) の
+        各係数を変えた変異（1→2, *→/, target 係数改変）は方向性アサートでは生き残る。
+        厳密値でピン留めして塞ぐ。
+        entry=500, target=0.05, spread=0.01 → 500*1.01*1.05/0.99 = 535.60606...
+        """
+        tp = compute_take_profit_price(Decimal("500"), Decimal("0.05"), spread_rate=Decimal("0.01"))
+        assert tp is not None
+        assert float(tp) == pytest.approx(500 * 1.01 * 1.05 / 0.99, rel=1e-12)
+
 
 class TestComputeNetPnl:
     def test_profitable_trade_no_spread(self):
@@ -175,3 +187,26 @@ class TestComputeNetPnl:
             shares=100,
         )
         assert pnl == Decimal("0")
+
+    def test_with_spread_exact_value(self):
+        """spread≠0 の純損益公式を厳密値で固定（バックテスト経路）。
+
+        mutation testing (V-3): spread 経路 (exit*(1-spread) - entry*(1+spread))*shares の
+        分岐条件・各係数の変異（== を !=、*→/、1±→2±、- を +、*shares を /shares 等）は
+        spread=0 のテストだけでは全て生き残る。厳密値でピン留めして塞ぐ。
+        entry=500, exit=550, spread=0.01, shares=100
+        effective_entry=505.00, effective_exit=544.50 → (544.50-505.00)*100 = 3950.00
+        """
+        pnl = compute_net_pnl(
+            entry_price=Decimal("500"),
+            exit_price=Decimal("550"),
+            shares=100,
+            spread_rate=Decimal("0.01"),
+        )
+        assert pnl == Decimal("3950.00")
+
+    def test_spread_reduces_profit_vs_no_spread(self):
+        """スプレッドがあると純利益は spread=0 の場合より小さくなる（分岐の意味を固定）。"""
+        no_spread = compute_net_pnl(Decimal("500"), Decimal("550"), 100, spread_rate=Decimal("0"))
+        with_spread = compute_net_pnl(Decimal("500"), Decimal("550"), 100, spread_rate=Decimal("0.01"))
+        assert with_spread < no_spread
