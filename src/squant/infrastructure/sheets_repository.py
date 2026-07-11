@@ -14,6 +14,7 @@ from squant.config.constants import (
     SHEET_RUN_LOG,
     SHEET_SLIPPAGE_LOG,
     SHEET_TRADES,
+    SHEET_WEEKLY_LOG,
 )
 from squant.domain.enums import ExecutionStatus, SystemState
 from squant.domain.models import (
@@ -446,6 +447,40 @@ class SheetsStateRepository:
                 continue
             padded = list(raw) + [""] * (len(self._SLIPPAGE_HEADER) - len(raw))
             out.append(dict(zip(self._SLIPPAGE_HEADER, padded)))  # noqa: B905
+        return out
+
+    # ── Weekly log（週次スナップショット・改善提案 A-4）─────────────────────────
+
+    _WEEKLY_HEADER = [
+        "date", "equity_jpy", "topix_close", "cumulative_pnl_jpy",
+        "cb_net_loss_jpy", "note",
+    ]
+
+    def append_weekly_snapshot(
+        self, *, log_date: date, equity_jpy: Decimal, topix_close: Decimal,
+        cumulative_pnl_jpy: Decimal, cb_net_loss_jpy: Decimal, note: str = "",
+    ) -> None:
+        """週次の評価額・TOPIX 終値スナップショットを weekly_log タブに追記する。"""
+        ws = self._c.get_or_create_sheet(SHEET_WEEKLY_LOG)
+        rows = self._c.read_all(SHEET_WEEKLY_LOG)
+        if not rows:
+            ws.append_row(self._WEEKLY_HEADER)
+        self._c.append_row(SHEET_WEEKLY_LOG, [
+            log_date.strftime(_DATE_FMT), str(equity_jpy), str(topix_close),
+            str(cumulative_pnl_jpy), str(cb_net_loss_jpy), note,
+        ])
+
+    def load_weekly_snapshots(self) -> list[dict[str, str]]:
+        """weekly_log の全行を dict のリストで返す（記録順）。"""
+        rows = self._c.read_all(SHEET_WEEKLY_LOG)
+        if len(rows) < 2:
+            return []
+        out = []
+        for raw in rows[1:]:
+            if not raw or not raw[0]:
+                continue
+            padded = list(raw) + [""] * (len(self._WEEKLY_HEADER) - len(raw))
+            out.append(dict(zip(self._WEEKLY_HEADER, padded)))  # noqa: B905
         return out
 
     # ── Circuit breaker ────────────────────────────────────────────────────────

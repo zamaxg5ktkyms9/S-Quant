@@ -84,6 +84,7 @@ SHEET_PENDING_SIGNALS = "pending_signals"
 SHEET_RECENT_SALES = "recent_sales"
 SHEET_FUNNEL_LOG = "funnel_log"
 SHEET_SLIPPAGE_LOG = "slippage_log"
+SHEET_WEEKLY_LOG = "weekly_log"
 
 # --- Universe health (requirements §ユニバース健全性の監視) ---
 FUNNEL_ALERT_WINDOW_DAYS = 20      # スクリーニング通過数の移動平均窓
