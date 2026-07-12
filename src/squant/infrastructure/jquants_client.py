@@ -104,6 +104,76 @@ class JQuantsClient:
 
     # ── Price data ─────────────────────────────────────────────────────────────
 
+    def _get_paginated(
+        self, path: str, params: dict, limiter: _RateLimiter, label: str,
+    ) -> list[dict] | None:
+        """GET (with pagination + 429 backoff) → data rows, or None on failure."""
+        for attempt in range(_429_MAX_CONSECUTIVE):
+            rows: list[dict] = []
+            pagination_key: str | None = None
+            ok = True
+
+            while True:
+                p = dict(params)
+                if pagination_key:
+                    p["pagination_key"] = pagination_key
+
+                limiter.wait()  # FetchTimeoutError が raise されることがある
+                try:
+                    resp = httpx.get(
+                        f"{_BASE_URL}{path}", params=p, headers=self._headers(), timeout=60,
+                    )
+                except FetchTimeoutError:
+                    raise
+                except Exception as e:
+                    logger.debug(f"J-Quants network error for {label}: {e}")
+                    return None
+
+                if resp.status_code == 429:
+                    limiter.set_backoff()
+                    ok = False
+                    break
+                if resp.status_code in (401, 403):
+                    logger.error(f"J-Quants API key rejected ({resp.status_code}): {resp.text[:200]}")
+                    return None
+                if not resp.is_success:
+                    logger.debug(f"J-Quants HTTP {resp.status_code} for {label}")
+                    return None
+
+                body = resp.json()
+                rows.extend(body.get("data", []))
+                pagination_key = body.get("pagination_key") or None
+                if not pagination_key:
+                    break
+
+            if ok:
+                return rows
+            if attempt == _429_MAX_CONSECUTIVE - 1:
+                logger.warning(f"{label}: {_429_MAX_CONSECUTIVE} consecutive 429s — skipping")
+                return None
+        return None
+
+    def fetch_equities_master(self, as_of: date | None = None) -> list[dict]:
+        """上場銘柄マスタ（as_of 指定でポイントインタイム。廃止銘柄も当時の姿で返る）。
+
+        行フィールド例: Code / CoName / MktNm（プライム・東証一部等）/
+        ProdCat（011=普通株）/ S17・S33（業種）。F1 ユニバース生成用。
+        """
+        params = {"date": as_of.isoformat()} if as_of else {}
+        rows = self._get_paginated(
+            "/equities/master", params, self._make_limiter(None),
+            f"master({as_of or 'latest'})",
+        )
+        return rows or []
+
+    def fetch_bars_for_date(self, day: date) -> list[dict]:
+        """指定日の全銘柄日次バー（1コールで全市場。Va=売買代金を含む）。"""
+        rows = self._get_paginated(
+            "/equities/bars/daily", {"date": day.isoformat()},
+            self._make_limiter(None), f"bars({day})",
+        )
+        return rows or []
+
     def _fetch_daily_quotes(
         self, ticker: str, start: date, end: date, limiter: _RateLimiter
     ) -> pd.DataFrame | None:
