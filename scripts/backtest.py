@@ -1114,6 +1114,9 @@ def main() -> None:
                         help=f"同時保有銘柄数の上限 (default: {DEFAULT_MAX_POSITIONS} = Phase 1)")
     parser.add_argument("--signal", choices=["pullback", "ma_cross"], default="ma_cross",
                         help="シグナル種別 (default: ma_cross = 採用済み C 戦略。pullback = 旧 A1/B)")
+    parser.add_argument("--pit", action="store_true",
+                        help="ポイントインタイム・モード（F1）: .backtest_cache/pit_data_*.pkl を使い"
+                             "四半期ユニバース切替・廃止銘柄手仕舞いで実行")
     parser.add_argument("--json", action="store_true", help="JSONメトリクスを最終行に出力（grid search用）")
     parser.add_argument("--quiet", action="store_true", help="進捗ログ抑制（grid search用）")
     args = parser.parse_args()
@@ -1122,6 +1125,37 @@ def main() -> None:
 
     start = date.fromisoformat(args.start)
     end   = date.fromisoformat(args.end)
+
+    # ── PIT モード: pit_data pickle を読み run_one_backtest(pit=True) へ ──────
+    if args.pit:
+        pit_files = sorted(Path(args.cache_dir).glob("pit_data_*.pkl"))
+        if not pit_files:
+            print("ERROR: pit_data_*.pkl がありません。先に build_pit_cache.py を実行してください。")
+            sys.exit(1)
+        with pit_files[-1].open("rb") as f:
+            pit_data = pickle.load(f)
+        print(f"PIT cache: {pit_files[-1]} "
+              f"({len(pit_data['universe_by_quarter'])} quarters, "
+              f"{pit_data['adj_close'].shape[1]} tickers)", flush=True)
+        metrics = run_one_backtest(
+            start, end, pit_data,
+            budget=args.budget,
+            max_positions=args.max_positions,
+            signal_strategy=args.signal,
+            target_profit=args.target_profit,
+            atr_mult=args.atr_mult,
+            rsi_upper=args.rsi_upper,
+            rsi_lower=args.rsi_lower,
+            time_stop=args.time_stop,
+            price_max=args.price_max,
+            pit=True,
+        )
+        for k in ("trades", "signals", "monthly_pnl_pct", "total_pnl", "win_rate",
+                  "profit_factor", "max_dd_pct", "sharpe_ratio", "by_reason"):
+            print(f"  {k}: {metrics.get(k)}")
+        if args.json:
+            print("__METRICS_JSON__" + json.dumps(metrics))
+        return
 
     api_key = os.environ.get("JQUANTS_API_KEY", "")
     client   = JQuantsClient(api_key=api_key, requests_per_minute=args.rpm)
