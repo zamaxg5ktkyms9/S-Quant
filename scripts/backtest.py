@@ -114,6 +114,22 @@ def _build_bps_map(fund_base: pd.DataFrame, adj_close_full: pd.DataFrame) -> dic
     return bps_map
 
 
+def _build_bps_map_asof(
+    fund_q: pd.DataFrame, adj_close_full: pd.DataFrame, as_of: date,
+) -> dict[str, float]:
+    """PIT 用 BPS 逆算: as-of 時点の終値と PBR から求める（未来の終値を使わない）。"""
+    bps_map: dict[str, float] = {}
+    for ticker in fund_q.index:
+        pbr = float(fund_q.at[ticker, "pbr"])
+        if pbr <= 0 or ticker not in adj_close_full.columns:
+            continue
+        closes = adj_close_full[ticker].loc[:str(as_of)].dropna()
+        if closes.empty:
+            continue
+        bps_map[ticker] = float(closes.iloc[-1]) / pbr
+    return bps_map
+
+
 def _update_pbr(
     fund_base: pd.DataFrame,
     bps_map: dict[str, float],
@@ -233,11 +249,41 @@ def _process_pending_entry(
     )
 
 
+def _force_delist_exit(
+    state: BacktestState, pos: Position, today: date, cache_df: pd.DataFrame,
+) -> None:
+    """上場廃止銘柄を最終取引日の終値で強制手仕舞いする（PIT モード用）。
+
+    TOB なら公開買付価格近辺、破綻なら暴落後の最終値で決済されるため、
+    生存者バイアスの損失側を過小評価しない。
+    """
+    close_col = "AdjC" if "AdjC" in cache_df.columns else "C"
+    last_close = Decimal(str(round(float(cache_df[close_col].dropna().iloc[-1]), 1)))
+    last_date = cache_df.index.max().date()
+    pnl = (last_close - pos.entry_price) * pos.shares
+    state.trades.append(TradeRecord(
+        ticker=pos.ticker,
+        signal_date=pos.entry_date,
+        entry_date=pos.entry_date,
+        exit_date=last_date,
+        entry_price=pos.entry_price,
+        exit_price=last_close,
+        shares=pos.shares,
+        pnl=pnl,
+        pnl_pct=float((last_close / pos.entry_price - 1) * 100),
+        holding_days=(last_date - pos.entry_date).days,
+        reason="DELISTED",
+    ))
+    state.cash += last_close * pos.shares
+    print(f"  EXIT  {pos.ticker} @ ¥{last_close} → DELISTED (last bar {last_date})", flush=True)
+
+
 def _process_exit(
     state: BacktestState,
     pos: Position,
     today: date,
     full_cache: dict[str, pd.DataFrame],
+    delist_after_days: int | None = None,
 ) -> Position | None:
     """1 Position の出口判定。退出時は None を返し、継続時は更新後 Position を返す。"""
     cache_df = full_cache.get(pos.ticker)
@@ -246,6 +292,12 @@ def _process_exit(
 
     ohlc = _get_ohlc_for_date(cache_df, today)
     if ohlc is None:
+        # PIT モード: データが一定日数途絶えていたら上場廃止とみなし強制手仕舞い
+        if delist_after_days is not None:
+            last = cache_df.index.max().date()
+            if last < today - timedelta(days=delist_after_days):
+                _force_delist_exit(state, pos, today, cache_df)
+                return None
         return pos
 
     today_open, today_high, today_low, today_close = ohlc
@@ -906,12 +958,22 @@ def run_one_backtest(
     universe: list[str] | None = None,
     precomputed_candidates: dict[date, list] | None = None,
     return_trades: bool = False,
+    pit: bool = False,
+    delist_after_days: int = 15,
 ) -> dict:
     """Execute one in-process backtest cycle and return its metrics dict.
 
     ``return_trades=True`` を渡すと metrics["trade_records"] に個々の
     TradeRecord（dataclass のリスト）を含める（Monte Carlo 等の分布分析用）。
     既存呼び出し（grid search / walk-forward）の返り値形状は不変。
+
+    ``pit=True``（F1 ポイントインタイム・モード）:
+    - data に universe_by_quarter / fundamentals_by_quarter
+      （build_pit_cache.py の出力）が必要
+    - 各営業日、その時点で有効な四半期スナップショットのユニバースと
+      as-of 開示ベースのファンダでスキャンする（universe 引数は無視）
+    - 保有銘柄のデータが delist_after_days 日以上途絶えたら上場廃止とみなし
+      最終取引日終値で強制手仕舞い（reason=DELISTED）
 
     Designed for the grid search / walk-forward in-process path: subprocess
     startup, pickle reload, and stdout parsing are all skipped — only the
@@ -936,13 +998,14 @@ def run_one_backtest(
     # 2) Build Settings and trading-day list.
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     settings.budget_jpy = Decimal(str(budget))
-    if universe is None:
+    if universe is None and not pit:
         universe = load_universe()
     adj_close_full = data["adj_close"]
     volume_full = data["volume"]
     full_cache = data["full_cache"]
-    fund_base = data["fundamentals"]
-    bps_map = data["bps_map"]
+    # PIT モードでは fund/bps は四半期スナップショットから日次で切り替える
+    fund_base = data.get("fundamentals")
+    bps_map = data.get("bps_map")
     trading_days = sorted(
         d.date() for d in pd.bdate_range(start, end) if is_tse_trading_day(d.date())
     )
@@ -958,15 +1021,32 @@ def run_one_backtest(
         else signal_engine.detect_signals
     )
 
+    # PIT モード: 四半期スナップショットの (as-of日, universe, fund, bps) を昇順に用意
+    pit_quarters: list[tuple[date, list[str], pd.DataFrame, dict[str, float]]] = []
+    if pit:
+        for q, tickers in sorted(data["universe_by_quarter"].items()):
+            fund_q = data["fundamentals_by_quarter"][q]
+            pit_quarters.append(
+                (q, tickers, fund_q, _build_bps_map_asof(fund_q, adj_close_full, q))
+            )
+    pit_idx = -1
+    delist = delist_after_days if pit else None
+
     # 3) Run the main loop with stdout suppressed (grid search quiet mode).
     import contextlib
     import io as _io
     try:
         with contextlib.redirect_stdout(_io.StringIO()):
             for today in trading_days:
+                # PIT: 今日有効な四半期スナップショットへ切替
+                while pit_idx + 1 < len(pit_quarters) and pit_quarters[pit_idx + 1][0] <= today:
+                    pit_idx += 1
+                    _, universe, fund_base, bps_map = pit_quarters[pit_idx]
+
                 updated: list[Position] = []
                 for pos in state.positions:
-                    result = _process_exit(state, pos, today, full_cache)
+                    result = _process_exit(state, pos, today, full_cache,
+                                           delist_after_days=delist)
                     if result is not None:
                         updated.append(result)
                 state.positions = updated
@@ -978,7 +1058,7 @@ def run_one_backtest(
                         break
                     _process_pending_entry(state, pending, today, full_cache, settings)
 
-                if state.open_slots > 0:
+                if state.open_slots > 0 and (not pit or pit_idx >= 0):
                     if precomputed_candidates is not None:
                         _scan_from_precomputed(
                             state, today, precomputed_candidates.get(today, []),
