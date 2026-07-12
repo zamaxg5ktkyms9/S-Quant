@@ -1,0 +1,79 @@
+name: Daily Parity Check
+
+on:
+  # 火〜土 01:20 JST = 月〜金 16:20 UTC。daily_run（22〜24時 JST 完走）・
+  # watchdog（23:45 JST）・sheets_backup（00:30 JST）の後段に置き、
+  # backup の bot コミットとの push 競合を時間差で避ける（V-1）。
+  # スキャン日（IDLE）の影実行はユニバース全取得を伴うため所要が長い。
+  schedule:
+    - cron: "20 16 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "照合対象日 YYYY-MM-DD（省略時: 直近 success ラン日）"
+        required: false
+        default: ""
+      force_scan:
+        description: "funnel 行が無くても scan 影実行する（実測用）"
+        required: false
+        default: "false"
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GCP_SA_KEY_JSON: ${{ secrets.GCP_SA_KEY_JSON }}
+      SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e .
+
+      - name: Run parity check
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.target_date }}" ]; then
+            ARGS="$ARGS --date ${{ github.event.inputs.target_date }}"
+          fi
+          if [ "${{ github.event.inputs.force_scan }}" = "true" ]; then
+            ARGS="$ARGS --force-scan"
+          fi
+          python scripts/parity_check.py $ARGS
+
+      # 乖離検出（exit 1）でも当日の照合結果 CSV は必ず永続化する。
+      # sheets_backup 等の並行 push に負けないよう rebase リトライつき。
+      - name: Commit parity log
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add parity/
+          if git diff --cached --quiet; then
+            echo "No changes — skipping commit"
+            exit 0
+          fi
+          git commit -m "chore(parity): daily parity log $(TZ=Asia/Tokyo date +%Y-%m-%d)"
+          for i in 1 2 3; do
+            if git push origin master; then
+              exit 0
+            fi
+            echo "push failed (attempt $i) — rebasing and retrying"
+            git pull --rebase origin master
+          done
+          git push origin master

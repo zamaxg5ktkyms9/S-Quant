@@ -216,7 +216,8 @@ class JQuantsClient:
     ) -> pd.DataFrame:
         """Return flat-column OHLCV DataFrame for holding_pipeline exit evaluation.
 
-        Columns: "Adj Close", "High", "Low", "Volume" — matches holding_pipeline expectations.
+        Columns: "Adj Close", "Open", "High", "Low", "Volume" — consumers select
+        by name, so the "Open" column (parity_check gap-aware replay) is additive.
         Only the first ticker is used (HOLDING always holds a single position).
         """
         if not tickers:
@@ -227,13 +228,15 @@ class JQuantsClient:
             return pd.DataFrame()
 
         close_col = "AdjC" if "AdjC" in df.columns else "C"
+        open_col = "AdjO" if "AdjO" in df.columns else "O"
         high_col = "AdjH" if "AdjH" in df.columns else "H"
         low_col = "AdjL" if "AdjL" in df.columns else "L"
         vol_col = "AdjVo" if "AdjVo" in df.columns else "Vo"
 
-        cols = [c for c in [close_col, high_col, low_col, vol_col] if c in df.columns]
+        cols = [c for c in [close_col, open_col, high_col, low_col, vol_col] if c in df.columns]
         return df[cols].rename(columns={
             close_col: "Adj Close",
+            open_col: "Open",
             high_col: "High",
             low_col: "Low",
             vol_col: "Volume",

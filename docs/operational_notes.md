@@ -200,9 +200,37 @@ mutmut show <mutant_name>      # 個別の変異 diff を表示
 
 ---
 
+## 10. 日次パリティ照合（V-1 検証強化パッケージ）
+
+`scripts/parity_check.py` が毎晩（Daily Parity Check workflow、火〜土 01:20 JST）
+直近の本番 success ラン日 D についてバックテストエンジン（モデル）を影実行し、
+本番が Sheets に記録した実挙動と照合する。Sheets は読み取りのみ・本番影響ゼロ。
+
+### 照合ドメインと severity
+
+| ドメイン | 照合内容 | alert になる条件 |
+|---|---|---|
+| exit | 保有ポジションをエントリー日から D までモデル再生（ザラ場 OCO・F-2 ギャップ考慮約定）し、本番の HOLD/EXIT・トレーリング値・決済理由/価格と照合 | 決済判断の不一致（モデル EXIT vs 本番 HOLD 等）、トレーリング乖離 > 1% |
+| entry | D エントリー分の寄付約定・ギャップ見送り判定 | モデルが「見送り」なのに実エントリー |
+| scan | IDLE スキャン日のみ。独立に J-Quants 再取得して本番スクリーニングを再実行し、funnel_log の4件数 + pending_signals の銘柄・参照価格を照合 | 件数・銘柄・参照価格の不一致 |
+
+- 結果は `parity/parity_log.csv` に全行追記（GHA が bot コミット）。alert があった日だけ
+  Slack 通知 + workflow 赤。info は既知の定義差の記録（例: モデルはザラ場高値、
+  本番は終値で highest を更新するためトレーリングは常に微小ドリフトする）。
+- **「モデル EXIT vs 本番 HOLD」alert の意味**: 本番夜ランは終値でしか出口判定しないが、
+  SBI の実逆指値はザラ場で約定する。この alert は「実際には売れているのに帳簿が
+  HOLDING のまま」の可能性を示す → オーナーに SBI 約定履歴の確認を依頼し、約定して
+  いれば `scripts/confirm_exit.py` で記録する（実例: 2026-07-10 の 2201.T、初回実行で検出）。
+- scan parity の所要はユニバース全取得（OHLCV+ファンダ）を伴うため長い。保有中/CB 日は
+  exit/entry のみで数十秒。手動実行: `python scripts/parity_check.py --dry-run`（記録なし）、
+  `--date YYYY-MM-DD` で過去日、`--force-scan` で funnel 行が無い日の scan 実測。
+
+---
+
 ## 改訂履歴
 
 - 2026-05-26: 初版作成（A1 / B-WF 1回目の失敗を受けて）
 - 2026-07-03: §0 追加（in-process + precompute がデフォルト化、§1〜3 は subprocess モード限定に）、§5 更新
 - 2026-07-10: §8 追加（独立レビュー F-3: 採用判断の in-sample 選択バイアス対策）
 - 2026-07-11: §9 追加（V-3 mutation testing のローカル実行手順・kill rate 判断基準・変異3分類）
+- 2026-07-12: §10 追加（V-1 日次パリティ照合の読み方・alert の意味・手動実行手順）

@@ -1,0 +1,4 @@
+run_date,checked_at,domain,item,model,actual,severity,note
+2026-07-10,2026-07-12T12:12:32+09:00,run,coverage,scan=no exits=1 entries=0,state=HOLDING note=,ok,
+2026-07-10,2026-07-12T12:12:32+09:00,exit,2201.T.decision,EXIT 2026-07-10 STOP_LOSS @¥2649.5625,HOLD（本番は継続保有）,alert,モデルはザラ場ストップ約定を予測。SBI の実逆指値が約定していないかオーナー確認が必要
+2026-07-10,2026-07-12T12:12:32+09:00,scan,coverage,n/a,no funnel row,ok,スキャンが走らない日（保有中/CB/非営業日）は scan parity 対象外
