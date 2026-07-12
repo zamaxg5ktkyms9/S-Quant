@@ -205,6 +205,24 @@ slippage_log に記録する（システムはモデル価格でしか記録し�
 - エントリー側は confirm_entry.py の記録から自動で slippage_log に入る。
 - 週次集計は金曜 21:15 JST に自動配信（GHA: Slippage Weekly Report）。
 
+### 2.4c 夜ランが検知できなかった売却の帳簿反映（V-1, 2026-07-12）
+
+逆指値がザラ場で約定したのに終値がストップ上で引けた日は、夜ラン（終値判定）が
+出口を検知できず帳簿が HOLDING のまま残る。パリティ照合がこのケースを
+「モデル EXIT vs 本番 HOLD」アラートで検出するので、SBI 約定履歴を確認し、
+約定していれば実売却価格を Slack で報告する → Claude が帳簿反映を代行:
+
+```bash
+# プレビュー（書き込みなし）→ 内容確認後 --apply
+.venv/bin/python scripts/record_manual_exit.py --ticker 2201.T --price 2663 --date 2026-07-10
+.venv/bin/python scripts/record_manual_exit.py --ticker 2201.T --price 2663 --date 2026-07-10 --apply
+```
+
+- trades / recent_sales / circuit_breaker / portfolio（SETTLING 遷移）/ slippage_log を
+  実約定価格で一括反映する。confirm_exit.py（記録のみ）とは役割が違う点に注意 —
+  trades に SELL 行が既にある売却には confirm_exit.py を使う（こちらは二重計上ガードで拒否される）。
+- 実例: 2026-07-10 の 2201.T ×100 @¥2,663（初回パリティ照合で検出 → 帳簿反映済み）。
+
 ### 2.5 STEP 5: トレーリングストップ更新（毎営業日 20:30 以降）
 
 1. Slack "TRAILING UPDATE" 通知を確認

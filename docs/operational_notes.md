@@ -220,7 +220,11 @@ mutmut show <mutant_name>      # 個別の変異 diff を表示
 - **「モデル EXIT vs 本番 HOLD」alert の意味**: 本番夜ランは終値でしか出口判定しないが、
   SBI の実逆指値はザラ場で約定する。この alert は「実際には売れているのに帳簿が
   HOLDING のまま」の可能性を示す → オーナーに SBI 約定履歴の確認を依頼し、約定して
-  いれば `scripts/confirm_exit.py` で記録する（実例: 2026-07-10 の 2201.T、初回実行で検出）。
+  いれば **`scripts/record_manual_exit.py`**（dry-run プレビュー → `--apply`）で
+  帳簿本体（trades/recent_sales/CB/portfolio/slippage）を実約定価格で反映する。
+  夜ランが既に出口検知済み（trades に SELL 行あり）の場合のみ `confirm_exit.py`
+  （記録のみ）を使う。実例: 2026-07-10 の 2201.T — 初回パリティで検出、
+  実約定 ¥2,663（想定ストップ比 -50.7bps 有利）で帳簿反映済み。
 - scan parity の所要はユニバース全取得（OHLCV+ファンダ）を伴うため長い。保有中/CB 日は
   exit/entry のみで数十秒。手動実行: `python scripts/parity_check.py --dry-run`（記録なし）、
   `--date YYYY-MM-DD` で過去日、`--force-scan` で funnel 行が無い日の scan 実測。
