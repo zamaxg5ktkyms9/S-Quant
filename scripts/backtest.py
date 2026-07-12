@@ -905,8 +905,13 @@ def run_one_backtest(
     price_max: float | None = None,
     universe: list[str] | None = None,
     precomputed_candidates: dict[date, list] | None = None,
+    return_trades: bool = False,
 ) -> dict:
     """Execute one in-process backtest cycle and return its metrics dict.
+
+    ``return_trades=True`` を渡すと metrics["trade_records"] に個々の
+    TradeRecord（dataclass のリスト）を含める（Monte Carlo 等の分布分析用）。
+    既存呼び出し（grid search / walk-forward）の返り値形状は不変。
 
     Designed for the grid search / walk-forward in-process path: subprocess
     startup, pickle reload, and stdout parsing are all skipped — only the
@@ -1003,6 +1008,8 @@ def run_one_backtest(
         "max_positions": max_positions,
         "signal": signal_strategy,
     }
+    if return_trades:
+        metrics["trade_records"] = list(state.trades)
     return metrics
 
 
