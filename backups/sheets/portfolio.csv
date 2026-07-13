@@ -1,2 +1,2 @@
 state,cash_jpy,ticker,shares,entry_price,intended_entry_price,entry_date,stop_loss_price,trailing_stop_price,highest_price_since_entry,time_stop_date,settle_date,last_run_id,cumulative_pnl_jpy,positions_json,settle_dates_csv
-HOLDING,328250.0,2201.T,100,2717.5,2733.5,2026-07-09,2649.5625,2649.5625,2717.5,2026-07-16,,b16bb92a,0,"[{""ticker"":""2201.T"",""shares"":100,""entry_price"":""2717.5"",""intended_entry_price"":""2733.5"",""entry_date"":""2026-07-09"",""stop_loss_price"":""2649.5625"",""trailing_stop_price"":""2649.5625"",""highest_price_since_entry"":""2717.5"",""time_stop_date"":""2026-07-16""}]",
+SIGNAL_SENT,594550.0,,,,,,,,,,,fe4e1352,-5450.0,,

@@ -1,1 +1,2 @@
 run_id,ticker,side,shares,price,executed_at,pnl_jpy,exit_reason
+manual,2201.T,SELL,100,2663,2026-07-10T15:00:00+09:00,-5450,STOP_LOSS
