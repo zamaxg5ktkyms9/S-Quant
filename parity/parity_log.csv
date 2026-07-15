@@ -6,3 +6,11 @@ run_date,checked_at,domain,item,model,actual,severity,note
 2026-07-13,2026-07-14T03:09:19+09:00,scan,coverage,n/a,no funnel row,ok,スキャンが走らない日（保有中/CB/非営業日）は scan parity 対象外
 2026-07-14,2026-07-15T02:35:11+09:00,run,coverage,scan=no exits=0 entries=0,state=IDLE note=,ok,
 2026-07-14,2026-07-15T02:35:11+09:00,scan,coverage,n/a,no funnel row,ok,スキャンが走らない日（保有中/CB/非営業日）は scan parity 対象外
+2026-07-15,2026-07-16T02:39:58+09:00,run,coverage,scan=yes exits=0 entries=0,state=SIGNAL_SENT note=,ok,
+2026-07-15,2026-07-16T02:39:58+09:00,scan,valid_tickers,205,205,ok,
+2026-07-15,2026-07-16T02:39:58+09:00,scan,screener_passed,22,22,ok,
+2026-07-15,2026-07-16T02:39:58+09:00,scan,signal_candidates,3,3,ok,
+2026-07-15,2026-07-16T02:39:58+09:00,scan,signals_sent,2,2,ok,
+2026-07-15,2026-07-16T02:39:58+09:00,scan,signal_tickers,"2301.T,3088.T","2301.T,3088.T",ok,
+2026-07-15,2026-07-16T02:39:58+09:00,scan,2301.T.reference_price,1646.0,1646.0,ok,
+2026-07-15,2026-07-16T02:39:58+09:00,scan,3088.T.reference_price,2469.5,2469.5,ok,
