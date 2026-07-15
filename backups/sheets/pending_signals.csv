@@ -1,1 +1,3 @@
 run_id,ticker,reference_price,shares,cancel_above_price,stop_loss_price,rsi,reason,generated_at,execution_status,actual_entry_price,actual_shares,confirmed_at
+2026-07-15T21:55:29.807251+09:00,3088.T,2469.5,100,2518.890,2407.7625,58.08,5×25日MAクロス | 出来高急増=1.32× | PBR=1.81 | 25日MA上向き,2026-07-15T21:55:29.807251+09:00,PENDING,,,
+2026-07-15T21:55:29.807310+09:00,2301.T,1646.0,100,1678.920,1604.8500,70.39,5×25日MAクロス | 出来高急増=1.26× | PBR=1.74 | 25日MA上向き,2026-07-15T21:55:29.807310+09:00,FILLED,1634.0,100,2026-07-15T23:32:37.901355+09:00
