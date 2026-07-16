@@ -14,3 +14,7 @@ run_date,checked_at,domain,item,model,actual,severity,note
 2026-07-15,2026-07-16T02:39:58+09:00,scan,signal_tickers,"2301.T,3088.T","2301.T,3088.T",ok,
 2026-07-15,2026-07-16T02:39:58+09:00,scan,2301.T.reference_price,1646.0,1646.0,ok,
 2026-07-15,2026-07-16T02:39:58+09:00,scan,3088.T.reference_price,2469.5,2469.5,ok,
+2026-07-16,2026-07-17T02:41:22+09:00,run,coverage,scan=no exits=0 entries=2,state=HOLDING note=,ok,
+2026-07-16,2026-07-17T02:41:22+09:00,entry,3088.T.decision,ENTRY @¥2451.5,ENTRY @¥2451.5,ok,実約定−モデル寄付 = ¥0.0（スリッページの正は slippage_log）
+2026-07-16,2026-07-17T02:41:22+09:00,entry,2301.T.decision,ENTRY @¥1659.0,ENTRY @¥1634.0,info,実約定−モデル寄付 = ¥-25.0（スリッページの正は slippage_log）
+2026-07-16,2026-07-17T02:41:22+09:00,scan,coverage,n/a,no funnel row,ok,スキャンが走らない日（保有中/CB/非営業日）は scan parity 対象外
