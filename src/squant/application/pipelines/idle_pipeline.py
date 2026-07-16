@@ -78,6 +78,19 @@ class IdlePipeline:
     def run(self, portfolio: PortfolioState, run_id: str) -> PortfolioState:
         today = self._clock.today_jst()
 
+        # 新規エントリー一時停止（運用姿勢②・§8.23）。paused の間は IDLE スキャン
+        # （新規シグナル生成）を丸ごとスキップする。保有ポジションの出口管理は
+        # HOLDING/SETTLING パイプラインで、確定済み pending の建玉化は
+        # _process_pending_signals で別途走るため、ここでの early-return はそれらに
+        # 影響しない。OHLCV フェッチも省けるので副作用ゼロで安全に止まる。
+        if self._settings.new_entries_paused:
+            logger.warning("New entries paused (posture 2) — skipping IDLE scan")
+            self._notifier.send(
+                ":pause_button: [S-Quant] 新規エントリー停止中（運用姿勢②・§8.23）。"
+                "保有分の出口管理は継続します。"
+            )
+            return portfolio
+
         # Compute 差金決済 forbidden tickers
         recent_sales = self._repo.load_recent_sales()
         next_exec = add_trading_days(today, 1)

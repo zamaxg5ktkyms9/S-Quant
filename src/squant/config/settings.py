@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     circuit_breaker_loss_jpy: Decimal = Field(
         default=Decimal("90000"), alias="CIRCUIT_BREAKER_LOSS_JPY"  # ¥600,000 × 15%
     )
+    # 新規エントリー一時停止（運用姿勢②・2026-07-16 オーナー決定）。True の間、
+    # IDLE スキャンは新規シグナルを生成しない。保有ポジションの出口管理・確定済み
+    # pending の建玉化・SETTLING は不変。既定 False（バックテスト/テストは通常挙動）。
+    # 本番有効化は daily_run.yml の env NEW_ENTRIES_PAUSED="true"。根拠は §8.23。
+    new_entries_paused: bool = Field(default=False, alias="NEW_ENTRIES_PAUSED")
 
 
 _settings: Settings | None = None

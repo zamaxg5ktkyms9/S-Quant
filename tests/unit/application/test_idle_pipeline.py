@@ -215,6 +215,36 @@ class TestIdlePipelineSlotsAndState:
         repo.save_pending_signals.assert_not_called()
         repo.save_portfolio.assert_not_called()
 
+    def test_new_entries_paused_short_circuits(self, monkeypatch):
+        """new_entries_paused=True → IDLE scan skipped entirely (posture 2, §8.23).
+
+        No market data fetch, no screening, no pending saved; portfolio returned
+        unchanged and a pause notice is sent. Held-position exit management lives
+        in the HOLDING/SETTLING pipelines, so it is unaffected by this guard.
+        """
+        monkeypatch.setenv("NEW_ENTRIES_PAUSED", "true")
+        pipeline, repo, notifier, sig_mock = _setup(
+            monkeypatch, universe=("A.T", "B.T"), max_positions=2
+        )
+        portfolio = _idle_portfolio()
+        result = pipeline.run(portfolio, "run1")
+        assert result is portfolio
+        pipeline._data.fetch_ohlcv.assert_not_called()
+        sig_mock.assert_not_called()
+        repo.save_pending_signals.assert_not_called()
+        assert any("新規エントリー停止中" in (c.args[0] if c.args else "")
+                   for c in notifier.send.call_args_list)
+
+    def test_not_paused_by_default(self, monkeypatch):
+        """Default (env unset) → new_entries_paused False → normal scan proceeds."""
+        monkeypatch.delenv("NEW_ENTRIES_PAUSED", raising=False)
+        pipeline, repo, notifier, sig_mock = _setup(
+            monkeypatch, universe=("A.T", "B.T"), max_positions=2
+        )
+        pipeline.run(_idle_portfolio(), "run1")
+        pipeline._data.fetch_ohlcv.assert_called_once()
+        sig_mock.assert_called()
+
     def test_abort_validation_raises(self, monkeypatch):
         """A ticker flagged ABORT_RUN by the validator aborts the whole run."""
         pipeline, _, _, _ = _setup(

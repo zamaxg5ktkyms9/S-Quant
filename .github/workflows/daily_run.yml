@@ -39,6 +39,10 @@ jobs:
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
       BYPASS_EXECUTION_TIME_GUARD: ${{ github.event.inputs.bypass_execution_time_guard || 'false' }}
       BYPASS_TRADING_DAY_CHECK: ${{ github.event.inputs.bypass_trading_day_check || 'false' }}
+      # 新規エントリー一時停止（運用姿勢②・2026-07-16 オーナー決定・§8.23）。
+      # IDLE スキャンの新規シグナル生成のみ止め、保有分の出口管理は継続する。
+      # 再開時はこの行を "false" にする（または削除）。
+      NEW_ENTRIES_PAUSED: "true"
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
