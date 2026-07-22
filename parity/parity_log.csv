@@ -42,3 +42,11 @@ run_date,checked_at,domain,item,model,actual,severity,note
 2026-07-21,2026-07-22T02:46:31+09:00,exit,3088.T.trailing_stop,2390.2125,2390.2125,ok,drift ¥0.0000（0.00%）
 2026-07-21,2026-07-22T02:46:31+09:00,exit,3088.T.highest,2557.0,2532.0,info,モデルはザラ場高値、本番は終値で更新（既知の定義差）
 2026-07-21,2026-07-22T02:46:31+09:00,scan,coverage,n/a,no funnel row,ok,スキャンが走らない日（保有中/CB/非営業日）は scan parity 対象外
+2026-07-22,2026-07-23T02:42:08+09:00,run,coverage,scan=no exits=2 entries=0,state=HOLDING note=,ok,
+2026-07-22,2026-07-23T02:42:08+09:00,exit,2301.T.decision,HOLD,HOLD,ok,
+2026-07-22,2026-07-23T02:42:08+09:00,exit,2301.T.trailing_stop,1607.230,1593.1500,info,drift ¥14.0800（0.88%）
+2026-07-22,2026-07-23T02:42:08+09:00,exit,2301.T.highest,1675.0,1655.0,info,モデルはザラ場高値、本番は終値で更新（既知の定義差）
+2026-07-22,2026-07-23T02:42:08+09:00,exit,3088.T.decision,HOLD,HOLD,ok,
+2026-07-22,2026-07-23T02:42:08+09:00,exit,3088.T.trailing_stop,2390.2125,2390.2125,ok,drift ¥0.0000（0.00%）
+2026-07-22,2026-07-23T02:42:08+09:00,exit,3088.T.highest,2557.0,2532.0,info,モデルはザラ場高値、本番は終値で更新（既知の定義差）
+2026-07-22,2026-07-23T02:42:08+09:00,scan,coverage,n/a,no funnel row,ok,スキャンが走らない日（保有中/CB/非営業日）は scan parity 対象外
