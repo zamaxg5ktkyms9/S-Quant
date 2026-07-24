@@ -58,3 +58,9 @@ run_date,checked_at,domain,item,model,actual,severity,note
 2026-07-23,2026-07-24T02:47:23+09:00,exit,3088.T.trailing_stop,2390.2125,2390.2125,ok,drift ¥0.0000（0.00%）
 2026-07-23,2026-07-24T02:47:23+09:00,exit,3088.T.highest,2557.0,2532.0,info,モデルはザラ場高値、本番は終値で更新（既知の定義差）
 2026-07-23,2026-07-24T02:47:23+09:00,scan,coverage,n/a,no funnel row,ok,スキャンが走らない日（保有中/CB/非営業日）は scan parity 対象外
+2026-07-24,2026-07-25T02:53:13+09:00,run,coverage,scan=no exits=2 entries=0,state=SETTLING note=,ok,
+2026-07-24,2026-07-25T02:53:13+09:00,exit,2301.T.decision,EXIT 2026-07-24 TRAILING_STOP,EXIT 2026-07-24 TIME_STOP,alert,決済日または理由が不一致
+2026-07-24,2026-07-25T02:53:13+09:00,exit,2301.T.exit_price,1607.230,1617,info,モデル−本番 = ¥-9.770（モデル=ザラ場ストップ/寄付、本番=終値記録。実約定は confirm_exit.py の slippage_log が正）
+2026-07-24,2026-07-25T02:53:13+09:00,exit,3088.T.decision,EXIT 2026-07-24 TIME_STOP,EXIT 2026-07-24 TIME_STOP,ok,
+2026-07-24,2026-07-25T02:53:13+09:00,exit,3088.T.exit_price,2458.5,2458.5,ok,モデル−本番 = ¥0.0（モデル=ザラ場ストップ/寄付、本番=終値記録。実約定は confirm_exit.py の slippage_log が正）
+2026-07-24,2026-07-25T02:53:13+09:00,scan,coverage,n/a,no funnel row,ok,スキャンが走らない日（保有中/CB/非営業日）は scan parity 対象外
