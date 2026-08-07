@@ -239,3 +239,87 @@ class TestDetectSignalsMaCross:
         assert c.pbr == 1.2
         assert c.market_cap_jpy > 0
         assert c.volume_surge_ratio >= float(VOLUME_SURGE_MULTIPLIER)
+
+
+# ── Plan B 探索用シグナル（reversal / value / high52） ─────────────────────────
+
+from squant.domain.signal_engine import (  # noqa: E402
+    HIGH52_WINDOW,
+    detect_signals_high52,
+    detect_signals_reversal,
+    detect_signals_value,
+    get_signal_func,
+)
+
+
+def test_get_signal_func_dispatch():
+    assert get_signal_func("reversal") is detect_signals_reversal
+    assert get_signal_func("value") is detect_signals_value
+    assert get_signal_func("high52") is detect_signals_high52
+    assert get_signal_func("ma_cross") is detect_signals_ma_cross
+    assert get_signal_func("pullback") is detect_signals  # fallback default
+
+
+class TestReversal:
+    def test_oversold_passes(self):
+        # 強い下落 → RSI ≤ 30
+        prices = np.linspace(1000.0, 500.0, 60)
+        ohlcv = _make_ohlcv("A.T", prices, vol_surge=False)
+        fund = _make_fund("A.T")
+        result = detect_signals_reversal(["A.T"], ohlcv, fund, AS_OF)
+        assert len(result) == 1
+        assert result[0].rsi14 <= 30.0
+
+    def test_uptrend_rejected(self):
+        prices = np.linspace(500.0, 1000.0, 60)  # 上昇 → RSI 高い
+        ohlcv = _make_ohlcv("A.T", prices, vol_surge=False)
+        fund = _make_fund("A.T")
+        result = detect_signals_reversal(["A.T"], ohlcv, fund, AS_OF)
+        assert result == []
+
+
+class TestValue:
+    def test_cheap_passes_expensive_rejected(self):
+        prices = np.linspace(500.0, 520.0, 30)
+        ohlcv = pd.concat(
+            [_make_ohlcv("CHEAP.T", prices), _make_ohlcv("RICH.T", prices)], axis=1
+        )
+        fund = pd.DataFrame(
+            {"pbr": [0.6, 3.0], "market_cap_jpy": [5e10, 5e10]},
+            index=["CHEAP.T", "RICH.T"],
+        )
+        result = detect_signals_value(["CHEAP.T", "RICH.T"], ohlcv, fund, AS_OF)
+        tickers = [c.ticker for c in result]
+        assert "CHEAP.T" in tickers
+        assert "RICH.T" not in tickers  # PBR 3.0 > 1.0 で除外
+
+    def test_negative_pbr_rejected(self):
+        prices = np.linspace(500.0, 520.0, 30)
+        ohlcv = _make_ohlcv("A.T", prices)
+        fund = pd.DataFrame({"pbr": [-1.0], "market_cap_jpy": [5e10]}, index=["A.T"])
+        assert detect_signals_value(["A.T"], ohlcv, fund, AS_OF) == []
+
+
+class TestHigh52:
+    def test_near_high_passes(self):
+        n = HIGH52_WINDOW + 5
+        prices = np.linspace(300.0, 700.0, n)  # 単調上昇 → 直近が最高値
+        ohlcv = _make_ohlcv("A.T", prices)
+        fund = _make_fund("A.T")
+        result = detect_signals_high52(["A.T"], ohlcv, fund, AS_OF)
+        assert len(result) == 1
+
+    def test_far_from_high_rejected(self):
+        n = HIGH52_WINDOW + 5
+        up = np.linspace(300.0, 900.0, n - 20)
+        down = np.linspace(900.0, 600.0, 20)  # 高値から大きく下落
+        prices = np.concatenate([up, down])
+        ohlcv = _make_ohlcv("A.T", prices)
+        fund = _make_fund("A.T")
+        assert detect_signals_high52(["A.T"], ohlcv, fund, AS_OF) == []
+
+    def test_insufficient_history_rejected(self):
+        prices = np.linspace(300.0, 700.0, 100)  # < 252
+        ohlcv = _make_ohlcv("A.T", prices)
+        fund = _make_fund("A.T")
+        assert detect_signals_high52(["A.T"], ohlcv, fund, AS_OF) == []

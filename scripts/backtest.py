@@ -875,11 +875,7 @@ def precompute_daily_candidates(
     volume_full = data["volume"]
     fund_base = data["fundamentals"]
     bps_map = data["bps_map"]
-    signal_func = (
-        signal_engine.detect_signals_ma_cross
-        if signal_strategy == "ma_cross"
-        else signal_engine.detect_signals
-    )
+    signal_func = signal_engine.get_signal_func(signal_strategy)
     trading_days = sorted(
         d.date() for d in pd.bdate_range(start, end) if is_tse_trading_day(d.date())
     )
@@ -1015,11 +1011,7 @@ def run_one_backtest(
         initial_capital=Decimal(str(budget)),
         max_positions=max_positions,
     )
-    signal_func = (
-        signal_engine.detect_signals_ma_cross
-        if signal_strategy == "ma_cross"
-        else signal_engine.detect_signals
-    )
+    signal_func = signal_engine.get_signal_func(signal_strategy)
 
     # PIT モード: 四半期スナップショットの (as-of日, universe, fund, bps) を昇順に用意
     pit_quarters: list[tuple[date, list[str], pd.DataFrame, dict[str, float]]] = []
@@ -1112,7 +1104,7 @@ def main() -> None:
                         help="スクリーニング株価上限を上書き (例: 2000 = 予算¥400k想定)")
     parser.add_argument("--max-positions", type=int, default=DEFAULT_MAX_POSITIONS,
                         help=f"同時保有銘柄数の上限 (default: {DEFAULT_MAX_POSITIONS} = Phase 1)")
-    parser.add_argument("--signal", choices=["pullback", "ma_cross"], default="ma_cross",
+    parser.add_argument("--signal", choices=["pullback", "ma_cross", "reversal", "value", "high52"], default="ma_cross",
                         help="シグナル種別 (default: ma_cross = 採用済み C 戦略。pullback = 旧 A1/B)")
     parser.add_argument("--pit", action="store_true",
                         help="ポイントインタイム・モード（F1）: .backtest_cache/pit_data_*.pkl を使い"
@@ -1252,10 +1244,7 @@ def main() -> None:
     report_interval = max(1, total_days // 8)
 
     # シグナル関数を解決
-    if args.signal == "ma_cross":
-        signal_func = signal_engine.detect_signals_ma_cross
-    else:
-        signal_func = signal_engine.detect_signals
+    signal_func = signal_engine.get_signal_func(args.signal)
 
     import contextlib
     import io as _io

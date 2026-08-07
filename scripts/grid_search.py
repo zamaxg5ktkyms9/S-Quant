@@ -196,7 +196,7 @@ def main() -> None:
                         help="バックテスト予算（円）。指定しなければ backtest.py のデフォルト")
     parser.add_argument("--max-positions", type=int, default=None,
                         help="同時保有銘柄数の上限。指定しなければ backtest.py のデフォルト")
-    parser.add_argument("--signal", choices=["pullback", "ma_cross"], default=None,
+    parser.add_argument("--signal", choices=["pullback", "ma_cross", "reversal", "value", "high52"], default=None,
                         help="シグナル種別。指定しなければ backtest.py のデフォルト")
     parser.add_argument("--price-max", type=float, default=None,
                         help="スクリーニング株価上限を上書き (例: 2000 = 予算¥400k想定)")

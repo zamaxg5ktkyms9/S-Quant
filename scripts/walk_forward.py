@@ -372,7 +372,7 @@ def main() -> None:
                         help="全体タイムアウト秒（default: 3600 = 1時間）。超過で自動 abort")
     parser.add_argument("--benchmark", action="store_true",
                         help=f"事前ベンチ（{BENCHMARK_COMBOS} combos × 1窓）で ETA を実測してから本実行")
-    parser.add_argument("--signal", choices=["pullback", "ma_cross"], default=None,
+    parser.add_argument("--signal", choices=["pullback", "ma_cross", "reversal", "value", "high52"], default=None,
                         help="シグナル種別を全 backtest に渡す（default: backtest.py のデフォルト=ma_cross）")
     parser.add_argument("--price-max", type=float, default=None,
                         help="スクリーニング株価上限を上書き (例: 2000 = 予算¥400k想定)")
