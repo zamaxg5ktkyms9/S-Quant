@@ -4,16 +4,15 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
-# Capture the Stop-hook payload (JSON on stdin) once, then forward it to the
-# Slack summariser so the last assistant reply is pushed to Slack — lets the
-# human read session results on their phone when away from the Mac. Best-effort:
-# never let it block the session from ending.
-INPUT="$(cat || true)"
-printf '%s' "$INPUT" | .venv/bin/python .claude/session_to_slack.py >/dev/null 2>&1 || true
+# Drain the Stop-hook payload (JSON on stdin) so the writer never blocks on a
+# full pipe. The Slack summariser used to consume it here; that forwarding was
+# removed on the owner's request (2026-08-10) — this hook now only runs the
+# post-session test+push.
+cat >/dev/null || true
 
 # Nothing changed → skip silently
 if [ -z "$(git status --porcelain 2>/dev/null)" ]; then
-  echo '{"systemMessage": "変更なし — テスト・pushをスキップ（Slackサマリは送信済み）"}'
+  echo '{"systemMessage": "変更なし — テスト・pushをスキップ"}'
   exit 0
 fi
 

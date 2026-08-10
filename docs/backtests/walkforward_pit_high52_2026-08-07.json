@@ -1,0 +1,104 @@
+{
+  "signal": "high52",
+  "budget": 600000,
+  "max_positions": 2,
+  "grid": {
+    "target_profit": [
+      null,
+      0.08
+    ],
+    "atr_mult": [
+      2.5,
+      3.0
+    ],
+    "time_stop": [
+      5,
+      10,
+      15
+    ]
+  },
+  "robust_criteria": {
+    "oos_pf_min": 1.0,
+    "oos_monthly_pct_min": 0.1
+  },
+  "windows": [
+    {
+      "label": "W1",
+      "is_period": "2022-01-01..2022-12-31",
+      "oos_period": "2023-01-01..2023-12-31",
+      "best_params": {
+        "target_profit": null,
+        "atr_mult": 2.5,
+        "time_stop": 15
+      },
+      "is_metrics": {
+        "monthly_pnl_pct": 1.3781576923076921,
+        "profit_factor": 2.1132477491279014,
+        "max_dd_pct": -5.585833333333333,
+        "trades": 24,
+        "win_rate": 0.4583333333333333
+      },
+      "oos_metrics": {
+        "monthly_pnl_pct": 2.3694670329670324,
+        "profit_factor": 1.4651246985853148,
+        "max_dd_pct": -18.259291666666666,
+        "trades": 62,
+        "win_rate": 0.3548387096774194
+      },
+      "robust": true
+    },
+    {
+      "label": "W2",
+      "is_period": "2023-01-01..2023-12-31",
+      "oos_period": "2024-01-01..2024-12-31",
+      "best_params": {
+        "target_profit": null,
+        "atr_mult": 3.0,
+        "time_stop": 10
+      },
+      "is_metrics": {
+        "monthly_pnl_pct": 2.8234034798534795,
+        "profit_factor": 1.6201977797363294,
+        "max_dd_pct": -12.351624999999999,
+        "trades": 64,
+        "win_rate": 0.421875
+      },
+      "oos_metrics": {
+        "monthly_pnl_pct": -0.08994721461187215,
+        "profit_factor": 0.9774618763190137,
+        "max_dd_pct": -14.936041666666666,
+        "trades": 66,
+        "win_rate": 0.3484848484848485
+      },
+      "robust": false
+    },
+    {
+      "label": "W3",
+      "is_period": "2024-01-01..2024-12-31",
+      "oos_period": "2025-01-01..2025-12-31",
+      "best_params": {
+        "target_profit": null,
+        "atr_mult": 3.0,
+        "time_stop": 5
+      },
+      "is_metrics": {
+        "monthly_pnl_pct": 0.37754995433789956,
+        "profit_factor": 1.0602441128620521,
+        "max_dd_pct": -28.061458333333334,
+        "trades": 104,
+        "win_rate": 0.375
+      },
+      "oos_metrics": {
+        "monthly_pnl_pct": -1.0290205128205128,
+        "profit_factor": 0.8139906450582105,
+        "max_dd_pct": -25.599375000000002,
+        "trades": 108,
+        "win_rate": 0.39814814814814814
+      },
+      "robust": false
+    }
+  ],
+  "n_robust": 1,
+  "n_windows": 3,
+  "verdict": "Marginal"
+}
