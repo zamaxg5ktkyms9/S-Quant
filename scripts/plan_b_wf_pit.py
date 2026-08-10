@@ -81,9 +81,11 @@ def main() -> None:
         sorted(Path(".backtest_cache").glob("pit_data_*.pkl"))[-1]
     )
     print(f"PIT cache: {cache}", flush=True)
-    data = pickle.load(open(cache, "rb"))
+    with open(cache, "rb") as fh:
+        data = pickle.load(fh)
 
-    combos = [dict(zip(GRID.keys(), vs)) for vs in itertools.product(*GRID.values())]
+    combos = [dict(zip(GRID.keys(), vs, strict=True))
+              for vs in itertools.product(*GRID.values())]
     print(f"Signal: {args.signal}  combos/IS: {len(combos)}  windows: {len(WINDOWS)}")
 
     window_results = []
