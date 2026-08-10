@@ -44,6 +44,8 @@ def get_signal_func(strategy: str):
         return detect_signals_value
     if strategy == "high52":
         return detect_signals_high52
+    if strategy == "pead":
+        return detect_signals_pead
     return detect_signals  # default: pullback (A1 戦略、後方互換)
 
 
@@ -398,6 +400,99 @@ def detect_signals_value(
         f"Value signal counts (dropped): "
         f"no_data={dropped['no_data']} cond1_pbr={dropped['cond1_pbr']} "
         f"passed={len(candidates)}"
+    )
+    return candidates
+
+
+# Plan B P3 (PEAD) 用
+PEAD_LOOKBACK_CAL_DAYS = 5     # 決算開示が as_of からこの暦日以内
+PEAD_MIN_SURPRISE = 0.05      # YoY 純利益サプライズ ≥ この値（+5%）
+
+# 決算イベント（{ticker: [{disc_date, yoy_np, ...}, ...]}）。backtest が run 前に注入する。
+# シグナル関数の共通シグネチャを崩さないためのモジュール変数（バックテストは直列実行）。
+_PEAD_EVENTS: dict[str, list[dict]] = {}
+
+
+def set_pead_events(events: dict[str, list[dict]] | None) -> None:
+    """PEAD 用の決算イベント辞書を注入する（disc_date 昇順であること）。"""
+    global _PEAD_EVENTS
+    _PEAD_EVENTS = events or {}
+
+
+def detect_signals_pead(
+    filtered_tickers: list[str],
+    ohlcv: pd.DataFrame,
+    fundamentals: pd.DataFrame,
+    as_of: date,
+) -> list[Candidate]:
+    """Plan B P3 — 決算後ドリフト（PEAD）.
+
+    仮説: 良い決算サプライズ後、株価は緩慢に織り込み数日〜数週間ドリフトで上昇する。
+
+    条件（ロングオンリー・翌日寄付エントリー）:
+    ① 直近の決算開示が as_of から PEAD_LOOKBACK_CAL_DAYS 暦日以内
+    ② その YoY 純利益サプライズ ≥ PEAD_MIN_SURPRISE
+
+    ランキング: サプライズ最大を優先（rsi14 = −yoy_np*100 プロキシ、rsi 昇順に整合）。
+    決算イベントは set_pead_events() で注入された _PEAD_EVENTS を参照する。
+    """
+    candidates: list[Candidate] = []
+    dropped = {"no_data": 0, "no_recent_disc": 0, "low_surprise": 0}
+
+    for ticker in filtered_tickers:
+        if ticker not in ohlcv.columns:
+            dropped["no_data"] += 1
+            continue
+        close = ohlcv[ticker].dropna()
+        if len(close) < 20:
+            dropped["no_data"] += 1
+            continue
+
+        evs = _PEAD_EVENTS.get(ticker)
+        if not evs:
+            dropped["no_recent_disc"] += 1
+            continue
+
+        # as_of 以前で最も新しい開示を探す（evs は disc_date 昇順）
+        recent = None
+        for e in reversed(evs):
+            dd = e.get("disc_date") or ""
+            if dd and dd <= as_of.isoformat():
+                recent = e
+                break
+        if recent is None:
+            dropped["no_recent_disc"] += 1
+            continue
+        disc = date.fromisoformat(recent["disc_date"])
+        if (as_of - disc).days > PEAD_LOOKBACK_CAL_DAYS:
+            dropped["no_recent_disc"] += 1
+            continue
+
+        surprise = recent.get("yoy_np")
+        if surprise is None or surprise < PEAD_MIN_SURPRISE:
+            dropped["low_surprise"] += 1
+            continue
+
+        fund = fundamentals.loc[ticker] if ticker in fundamentals.index else None
+        pbr = float(fund.get("pbr", 99.0)) if fund is not None else 99.0
+        mcap = float(fund.get("market_cap_jpy", 0)) if fund is not None else 0.0
+
+        candidates.append(
+            Candidate(
+                ticker=ticker,
+                close=Decimal(str(round(close.iloc[-1], 1))),
+                rsi14=-float(surprise) * 100.0,  # サプライズ最大を優先（rsi 昇順）
+                volume_surge_ratio=1.0,
+                pbr=pbr,
+                market_cap_jpy=mcap,
+            )
+        )
+
+    import logging as _logging
+    _logging.getLogger(__name__).info(
+        f"PEAD signal counts (dropped): "
+        f"no_data={dropped['no_data']} no_recent_disc={dropped['no_recent_disc']} "
+        f"low_surprise={dropped['low_surprise']} passed={len(candidates)}"
     )
     return candidates
 

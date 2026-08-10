@@ -1012,6 +1012,10 @@ def run_one_backtest(
         max_positions=max_positions,
     )
     signal_func = signal_engine.get_signal_func(signal_strategy)
+    # PEAD: 決算イベントを注入（他シグナルでは stale を避けるためクリア）
+    signal_engine.set_pead_events(
+        data.get("earnings_events") if signal_strategy == "pead" else {}
+    )
 
     # PIT モード: 四半期スナップショットの (as-of日, universe, fund, bps) を昇順に用意
     pit_quarters: list[tuple[date, list[str], pd.DataFrame, dict[str, float]]] = []
@@ -1104,7 +1108,7 @@ def main() -> None:
                         help="スクリーニング株価上限を上書き (例: 2000 = 予算¥400k想定)")
     parser.add_argument("--max-positions", type=int, default=DEFAULT_MAX_POSITIONS,
                         help=f"同時保有銘柄数の上限 (default: {DEFAULT_MAX_POSITIONS} = Phase 1)")
-    parser.add_argument("--signal", choices=["pullback", "ma_cross", "reversal", "value", "high52"], default="ma_cross",
+    parser.add_argument("--signal", choices=["pullback", "ma_cross", "reversal", "value", "high52", "pead"], default="ma_cross",
                         help="シグナル種別 (default: ma_cross = 採用済み C 戦略。pullback = 旧 A1/B)")
     parser.add_argument("--pit", action="store_true",
                         help="ポイントインタイム・モード（F1）: .backtest_cache/pit_data_*.pkl を使い"
@@ -1129,6 +1133,15 @@ def main() -> None:
         print(f"PIT cache: {pit_files[-1]} "
               f"({len(pit_data['universe_by_quarter'])} quarters, "
               f"{pit_data['adj_close'].shape[1]} tickers)", flush=True)
+        # PEAD: 決算イベントキャッシュを注入（Plan B ㋐）
+        if args.signal == "pead":
+            earn_path = Path(args.cache_dir) / "pit_earnings_events.pkl"
+            if not earn_path.exists():
+                print("ERROR: pit_earnings_events.pkl がありません。先に build_pead_cache.py を実行してください。")
+                sys.exit(1)
+            with earn_path.open("rb") as f:
+                pit_data["earnings_events"] = pickle.load(f)
+            print(f"PEAD events: {earn_path} ({len(pit_data['earnings_events'])} tickers)", flush=True)
         metrics = run_one_backtest(
             start, end, pit_data,
             budget=args.budget,

@@ -84,6 +84,12 @@ def main() -> None:
     with open(cache, "rb") as fh:
         data = pickle.load(fh)
 
+    if args.signal == "pead":
+        earn_path = Path(".backtest_cache/pit_earnings_events.pkl")
+        with open(earn_path, "rb") as fh:
+            data["earnings_events"] = pickle.load(fh)
+        print(f"PEAD events: {earn_path} ({len(data['earnings_events'])} tickers)", flush=True)
+
     combos = [dict(zip(GRID.keys(), vs, strict=True))
               for vs in itertools.product(*GRID.values())]
     print(f"Signal: {args.signal}  combos/IS: {len(combos)}  windows: {len(WINDOWS)}")

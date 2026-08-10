@@ -323,3 +323,52 @@ class TestHigh52:
         ohlcv = _make_ohlcv("A.T", prices)
         fund = _make_fund("A.T")
         assert detect_signals_high52(["A.T"], ohlcv, fund, AS_OF) == []
+
+
+# ── Plan B P3 (PEAD) ────────────────────────────────────────────────────────
+
+from squant.domain.signal_engine import (  # noqa: E402
+    PEAD_LOOKBACK_CAL_DAYS,
+    PEAD_MIN_SURPRISE,
+    detect_signals_pead,
+    set_pead_events,
+)
+
+
+class TestPead:
+    def _ohlcv(self, ticker="A.T"):
+        return _make_ohlcv(ticker, np.linspace(500.0, 520.0, 30))
+
+    def test_dispatch(self):
+        assert get_signal_func("pead") is detect_signals_pead
+
+    def test_recent_positive_surprise_passes(self):
+        set_pead_events({"A.T": [
+            {"disc_date": (AS_OF.isoformat()), "yoy_np": PEAD_MIN_SURPRISE + 0.2},
+        ]})
+        result = detect_signals_pead(["A.T"], self._ohlcv(), _make_fund("A.T"), AS_OF)
+        assert len(result) == 1
+
+    def test_stale_disclosure_rejected(self):
+        from datetime import timedelta
+        old = (AS_OF - timedelta(days=PEAD_LOOKBACK_CAL_DAYS + 10)).isoformat()
+        set_pead_events({"A.T": [{"disc_date": old, "yoy_np": 0.5}]})
+        assert detect_signals_pead(["A.T"], self._ohlcv(), _make_fund("A.T"), AS_OF) == []
+
+    def test_low_surprise_rejected(self):
+        set_pead_events({"A.T": [
+            {"disc_date": AS_OF.isoformat(), "yoy_np": PEAD_MIN_SURPRISE - 0.01},
+        ]})
+        assert detect_signals_pead(["A.T"], self._ohlcv(), _make_fund("A.T"), AS_OF) == []
+
+    def test_no_events_rejected(self):
+        set_pead_events({})
+        assert detect_signals_pead(["A.T"], self._ohlcv(), _make_fund("A.T"), AS_OF) == []
+
+    def test_future_disclosure_not_used(self):
+        # as_of より後の開示は使わない（look-ahead 防止）
+        from datetime import timedelta
+        future = (AS_OF + timedelta(days=1)).isoformat()
+        set_pead_events({"A.T": [{"disc_date": future, "yoy_np": 0.5}]})
+        assert detect_signals_pead(["A.T"], self._ohlcv(), _make_fund("A.T"), AS_OF) == []
+        set_pead_events({})  # cleanup
