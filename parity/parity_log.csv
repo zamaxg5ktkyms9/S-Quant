@@ -86,3 +86,5 @@ run_date,checked_at,domain,item,model,actual,severity,note
 2026-08-10,2026-08-11T02:09:50+09:00,scan,coverage,n/a,no funnel row,ok,スキャンが走らない日（保有中/CB/非営業日）は scan parity 対象外
 2026-08-10,2026-08-12T02:13:12+09:00,run,coverage,scan=no exits=0 entries=0,state=IDLE note=,ok,
 2026-08-10,2026-08-12T02:13:12+09:00,scan,coverage,n/a,no funnel row,ok,スキャンが走らない日（保有中/CB/非営業日）は scan parity 対象外
+2026-08-12,2026-08-13T02:13:48+09:00,run,coverage,scan=no exits=0 entries=0,state=IDLE note=,ok,
+2026-08-12,2026-08-13T02:13:48+09:00,scan,coverage,n/a,no funnel row,ok,スキャンが走らない日（保有中/CB/非営業日）は scan parity 対象外
