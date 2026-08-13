@@ -1,2 +1,2 @@
 state,cash_jpy,ticker,shares,entry_price,intended_entry_price,entry_date,stop_loss_price,trailing_stop_price,highest_price_since_entry,time_stop_date,settle_date,last_run_id,cumulative_pnl_jpy,positions_json,settle_dates_csv
-IDLE,593550.0,,,,,,,,,,,606bebb4,-6450.0,,
+IDLE,593550.0,,,,,,,,,,,bc9045fb,-6450.0,,
